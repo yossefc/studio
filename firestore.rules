@@ -1,0 +1,46 @@
+
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    /**
+     * FIRESTORE SECURITY RULES
+     * 
+     * Core Philosophy:
+     * - User data is private and ownership-based.
+     * - Global cache is server-managed only (no client access).
+     */
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    match /users/{userId}/studyGuides/{studyGuideId} {
+      allow get, list: if isOwner(userId);
+      allow create: if isOwner(userId) && request.resource.data.userId == userId;
+      allow update: if isOwner(userId) && request.resource.data.userId == resource.data.userId;
+      allow delete: if isOwner(userId);
+
+      match /textChunks/{textChunkId} {
+        allow get, list: if isOwner(userId);
+        allow create: if isOwner(userId) && request.resource.data.userId == userId;
+        allow update: if isOwner(userId) && request.resource.data.userId == resource.data.userId;
+        allow delete: if isOwner(userId);
+      }
+    }
+
+    match /explanationCacheEntries/{explanationCacheEntryId} {
+      // Global cache is managed by server/admin only.
+      // Client SDK has no direct read/write access.
+      allow get, list, create, update, delete: if false;
+    }
+
+    match /{path=**} {
+      allow read, write: if false;
+    }
+  }
+}

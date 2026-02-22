@@ -1,0 +1,11 @@
+
+{
+  "placeholderImages": [
+    {
+      "id": "hero-bg",
+      "description": "Ancient manuscript background with golden lighting",
+      "imageUrl": "https://picsum.photos/seed/talmud-1/1200/600",
+      "imageHint": "ancient manuscript"
+    }
+  ]
+}

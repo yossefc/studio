@@ -1,0 +1,213 @@
+{
+  "entities": {
+    "StudyGuide": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "StudyGuide",
+      "type": "object",
+      "description": "Represents a generated study guide based on a Sefaria reference, including its generation status and link to the published Google Doc.",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier for the StudyGuide entity."
+        },
+        "userId": {
+          "type": "string",
+          "description": "Identifier of the user who initiated the study guide generation. (Relationship: User 1:N StudyGuide)"
+        },
+        "tref": {
+          "type": "string",
+          "description": "The normalized Sefaria reference ('tref') provided by the user, e.g., 'Chullin 2a'."
+        },
+        "language": {
+          "type": "string",
+          "description": "The language chosen for the study guide (e.g., 'he' for Hebrew, 'en' for English). Currently, the pipeline is forced to Hebrew."
+        },
+        "status": {
+          "type": "string",
+          "description": "Current status of the study guide generation process (e.g., 'Pending', 'Fetching', 'Chunking', 'Explaining', 'Summarizing', 'Published', 'Cancelled', 'Failed')."
+        },
+        "googleDocId": {
+          "type": "string",
+          "description": "The ID of the generated Google Document after successful publishing."
+        },
+        "googleDocUrl": {
+          "type": "string",
+          "description": "The URL of the generated Google Document for sharing and direct access."
+        },
+        "summaryText": {
+          "type": "string",
+          "description": "The AI-generated summary of the entire study guide, focused on Halacha Lema'aseh, presented in bullet points."
+        },
+        "summaryModelName": {
+          "type": "string",
+          "description": "The name of the AI model used to generate the final summary."
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "Timestamp when the study guide generation was initiated.",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "Timestamp when the study guide record was last updated.",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "userId",
+        "tref",
+        "language",
+        "status",
+        "createdAt"
+      ]
+    },
+    "TextChunk": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "TextChunk",
+      "type": "object",
+      "description": "Represents a segmented portion of the Sefaria text, used as input for AI explanation.",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier for the TextChunk entity, following the stable ID format: OC_{siman}_{seif}_{SOURCE}_chunk_{k}."
+        },
+        "studyGuideId": {
+          "type": "string",
+          "description": "Reference to the StudyGuide this chunk belongs to. (Relationship: StudyGuide 1:N TextChunk)"
+        },
+        "orderIndex": {
+          "type": "number",
+          "description": "The sequential order of this chunk within its parent study guide."
+        },
+        "rawText": {
+          "type": "string",
+          "description": "The raw text content of the chunk as retrieved from Sefaria."
+        },
+        "rawHash": {
+          "type": "string",
+          "description": "A cryptographic hash of the raw text content, used for idempotence and detecting changes."
+        },
+        "explanationCacheEntryId": {
+          "type": "string",
+          "description": "Reference to the ID of the cached AI explanation (ExplanationCacheEntry) used for this specific chunk, considering its context. (Relationship: TextChunk N:1 ExplanationCacheEntry)"
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "Timestamp when the text chunk was created.",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "studyGuideId",
+        "orderIndex",
+        "rawText",
+        "rawHash",
+        "createdAt"
+      ]
+    },
+    "ExplanationCacheEntry": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "ExplanationCacheEntry",
+      "type": "object",
+      "description": "A global cache for AI-generated explanations, keyed by a deterministic hash of the input context to avoid redundant LLM calls.",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Deterministic unique identifier for the cached explanation. This ID is computed as a hash of the combined current chunk's raw text and the preceding explanation's text, serving as the unique cache key."
+        },
+        "explanationText": {
+          "type": "string",
+          "description": "The AI-generated explanation content for the given input context."
+        },
+        "modelName": {
+          "type": "string",
+          "description": "The name of the AI model used to generate this explanation."
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "Timestamp when this explanation was first generated and added to the cache.",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "explanationText",
+        "modelName",
+        "createdAt"
+      ]
+    }
+  },
+  "auth": {
+    "providers": [
+      "password",
+      "anonymous"
+    ]
+  },
+  "firestore": {
+    "structure": [
+      {
+        "path": "/users/{userId}/studyGuides/{studyGuideId}",
+        "definition": {
+          "entityName": "StudyGuide",
+          "schema": {
+            "$ref": "#/backend/entities/StudyGuide"
+          },
+          "description": "Stores individual study guides generated by users. This path enforces user ownership. The document includes a 'userId' field for explicit ownership and robust security rules based on the path and document data.",
+          "params": [
+            {
+              "name": "userId",
+              "description": "The unique identifier of the user who owns this study guide."
+            },
+            {
+              "name": "studyGuideId",
+              "description": "The unique identifier for the specific study guide."
+            }
+          ]
+        }
+      },
+      {
+        "path": "/users/{userId}/studyGuides/{studyGuideId}/textChunks/{textChunkId}",
+        "definition": {
+          "entityName": "TextChunk",
+          "schema": {
+            "$ref": "#/backend/entities/TextChunk"
+          },
+          "description": "Stores individual text chunks that comprise a specific study guide. This path maintains the user's ownership hierarchy. Includes denormalized 'userId' and 'studyGuideId' for authorization independence, allowing direct security rule evaluation without 'get()' calls to parent documents.",
+          "params": [
+            {
+              "name": "userId",
+              "description": "The unique identifier of the user who owns the parent study guide."
+            },
+            {
+              "name": "studyGuideId",
+              "description": "The unique identifier of the parent study guide."
+            },
+            {
+              "name": "textChunkId",
+              "description": "The unique identifier for the specific text chunk within the study guide."
+            }
+          ]
+        }
+      },
+      {
+        "path": "/explanationCacheEntries/{explanationCacheEntryId}",
+        "definition": {
+          "entityName": "ExplanationCacheEntry",
+          "schema": {
+            "$ref": "#/backend/entities/ExplanationCacheEntry"
+          },
+          "description": "A global, shared cache for AI-generated explanations. Access is typically backend-managed for writes, while authenticated users can 'get' specific entries if they know the 'explanationCacheEntryId'. This collection has a distinct security posture and does not depend on user ownership.",
+          "params": [
+            {
+              "name": "explanationCacheEntryId",
+              "description": "The deterministic unique identifier for the cached explanation (a hash of the input context)."
+            }
+          ]
+        }
+      }
+    ],
+    "reasoning": "The Firestore data structure is designed with a strong emphasis on Authorization Independence and supporting Query as Predicates (QAPs) for secure `list` operations, as mandated. We utilize hierarchical paths for user-owned data and denormalize authorization context where necessary.\n\n1.  **User-Specific Data (`StudyGuide` and `TextChunk`):**\n    *   `StudyGuide` entities are stored in a subcollection under each user's document: `/users/{userId}/studyGuides/{studyGuideId}`. This immediately establishes path-based ownership, making it clear that only the user identified by `{userId}` can access these documents. The `StudyGuide` document itself also contains a `userId` field (denormalized ownership). This structure directly supports QAPs; a user can perform a `list` query on `/users/{request.auth.uid}/studyGuides` and the security rules can enforce `request.auth.uid == userId` using the path wildcard, ensuring users only retrieve their own study guides securely.\n    *   `TextChunk` entities, which belong to a `StudyGuide`, follow this hierarchy further: `/users/{userId}/studyGuides/{studyGuideId}/textChunks/{textChunkId}`. To achieve **Authorization Independence** (Mandate A), the `TextChunk` document **denormalizes** the `userId` (from its parent `StudyGuide`) and `studyGuideId` directly into its fields. This means that any security rule for a `TextChunk` document can evaluate `request.auth.uid == resource.data.userId` without needing to perform a `get()` operation on the parent `StudyGuide` or `User` document. This is critical for atomic operations and simplifies rule debugging. QAPs are also supported here, allowing users to list chunks for a specific study guide they own, with rules enforcing `request.auth.uid == userId` based on the path.\n\n2.  **Global Cache Data (`ExplanationCacheEntry`):**\n    *   `ExplanationCacheEntry` documents are stored in a top-level collection: `/explanationCacheEntries/{explanationCacheEntryId}`. This adheres to **Structural Segregation** (Mandate B) because these are global, shared cache entries with a different security posture than user-specific data. \n    *   For security, this collection is designed to be primarily written to by the backend service (via Admin SDK). Client read access is restricted to `get` operations for a specific `explanationCacheEntryId`. This supports QAPs because authenticated clients *can* retrieve a specific cached explanation if they know its deterministic ID (e.g., by computing the hash), but they *cannot* perform broad `list` operations to discover or enumerate all cached explanations, thus preventing data leakage and ensuring efficient rule evaluation. Authorization Independence is naturally met as there are no parent dependencies for this top-level collection."
+  }
+}

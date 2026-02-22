@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git -C \"D:\\\\biur\\\\studio\" log --oneline -10)",
+      "Bash(wc -l \"D:\\\\biur\\\\studio\\\\src\"/**/*.{ts,tsx})",
+      "Bash(tree:*)",
+      "Bash(npx tsc:*)",
+      "Bash(npm run typecheck:*)",
+      "Bash(npx:*)",
+      "Bash(node_modules.bintsc --noEmit)",
+      "Bash(./node_modules/.bin/tsc:*)",
+      "Bash(ls:*)",
+      "Bash(npm ls:*)",
+      "Bash(npm install:*)",
+      "Bash(npm run dev:*)",
+      "WebFetch(domain:www.sefaria.org)"
+    ]
+  }
+}
