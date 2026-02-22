@@ -135,15 +135,21 @@ export default function MyGuidesPage() {
                     <span className="w-24 text-center text-xs text-muted-foreground">
                       {guide.createdAt ? new Date(guide.createdAt).toLocaleDateString('he-IL') : '—'}
                     </span>
-                    <a
-                      href={guide.googleDocUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="w-10 h-8 inline-flex items-center justify-center rounded-lg text-primary hover:bg-primary/10 transition-colors"
-                      title="פתח ב-Google Docs"
-                    >
-                      <ExternalLink className="w-4 h-4" />
-                    </a>
+                    {guide.googleDocUrl ? (
+                      <a
+                        href={guide.googleDocUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="h-8 px-3 inline-flex items-center gap-1.5 rounded-lg text-xs font-medium text-primary bg-primary/10 hover:bg-primary/20 transition-colors"
+                      >
+                        <ExternalLink className="w-3.5 h-3.5" />
+                        <span>Docs</span>
+                      </a>
+                    ) : (
+                      <span className="h-8 px-3 inline-flex items-center rounded-lg text-xs text-muted-foreground bg-muted/50">
+                        טרם יוצא
+                      </span>
+                    )}
                   </div>
                 ))}
               </div>
