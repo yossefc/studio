@@ -5,16 +5,25 @@
 import { google, docs_v1 } from 'googleapis';
 import type { SourceResult } from '@/app/actions/study-guide';
 
-type BoldRange = { start: number; end: number };
+type StyledRange = { start: number; end: number; style: 'bold' | 'title' | 'sectionHeader' | 'sourceLabel' | 'sourceText' | 'summaryHeader' | 'separator' };
 
 const DOC_FONT_SIZE_PT = 11;
-const DOC_LINE_SPACING = 110;
-const DOC_PARAGRAPH_SPACE_PT = 2;
+const DOC_TITLE_FONT_SIZE_PT = 18;
+const DOC_SECTION_FONT_SIZE_PT = 14;
+const DOC_LINE_SPACING = 115;
+const DOC_PARAGRAPH_SPACE_PT = 3;
 
-function extractBoldRanges(text: string, startIndex: number): { cleanText: string; ranges: BoldRange[] } {
+// Colors matching the app's theme (from globals.css)
+const COLOR_PRIMARY = { red: 52 / 255, green: 107 / 255, blue: 191 / 255 };       // #346DBF
+const COLOR_DARK = { red: 24 / 255, green: 38 / 255, blue: 71 / 255 };            // #182647
+const COLOR_SOURCE_BG = { red: 242 / 255, green: 247 / 255, blue: 250 / 255 };    // #F2F7FA
+const COLOR_MUTED = { red: 104 / 255, green: 120 / 255, blue: 141 / 255 };        // #68788D
+const COLOR_SUMMARY_BG = { red: 235 / 255, green: 242 / 255, blue: 252 / 255 };   // #EBF2FC
+
+function extractBoldRanges(text: string, startIndex: number): { cleanText: string; ranges: StyledRange[] } {
   let i = 0;
   let cleanText = '';
-  const ranges: BoldRange[] = [];
+  const ranges: StyledRange[] = [];
 
   while (i < text.length) {
     const isBoldMarker = text[i] === '*' && text[i + 1] === '*';
@@ -38,6 +47,7 @@ function extractBoldRanges(text: string, startIndex: number): { cleanText: strin
       ranges.push({
         start: startIndex + boldStart,
         end: startIndex + boldEnd,
+        style: 'bold',
       });
     }
 
@@ -65,75 +75,96 @@ function normalizeForDoc(text: string, collapseLineBreaks = false): string {
 
 /**
  * Creates a formatted Google Doc for a multi-source study guide.
- * Organizes content by source with section headers.
+ * Organizes content by source with section headers and colors matching the app UI.
  */
 export async function createStudyGuideDoc(
   tref: string,
   summary: string,
   sourceResults: SourceResult[],
 ): Promise<{ id: string; url: string }> {
-  const auth = new google.auth.GoogleAuth({
-    scopes: [
-      'https://www.googleapis.com/auth/documents',
-      'https://www.googleapis.com/auth/drive',
-    ],
-  });
+  const clientId = process.env.GOOGLE_OAUTH_CLIENT_ID;
+  const clientSecret = process.env.GOOGLE_OAUTH_CLIENT_SECRET;
+  const refreshToken = process.env.GOOGLE_OAUTH_REFRESH_TOKEN;
+
+  if (!clientId || !clientSecret || !refreshToken) {
+    throw new Error('[GoogleDocs] Missing GOOGLE_OAUTH_CLIENT_ID, GOOGLE_OAUTH_CLIENT_SECRET, or GOOGLE_OAUTH_REFRESH_TOKEN in env.');
+  }
+
+  const auth = new google.auth.OAuth2(clientId, clientSecret);
+  auth.setCredentials({ refresh_token: refreshToken });
+
+  console.info('[GoogleDocs] Authenticating with OAuth2 user token');
 
   const docs = google.docs({ version: 'v1', auth });
   const drive = google.drive({ version: 'v3', auth });
 
-  const createResponse = await docs.documents.create({
+  const createResponse = await drive.files.create({
     requestBody: {
-      title: `ביאור ${tref}`,
+      name: `ביאור ${tref}`,
+      mimeType: 'application/vnd.google-apps.document',
     },
+    fields: 'id',
   });
 
-  const documentId = createResponse.data.documentId;
+  const documentId = createResponse.data.id;
   if (!documentId) {
-    throw new Error('Google Docs API did not return a documentId.');
+    throw new Error('Google Drive API did not return a file ID.');
   }
 
-  // Share the document with the user
-  await drive.permissions.create({
-    fileId: documentId,
-    requestBody: {
-      type: 'user',
-      role: 'writer',
-      emailAddress: 'yossefcohzar@gmail.com',
-    },
-    sendNotificationEmail: false,
-  });
-
-  const boldRanges: BoldRange[] = [];
+  const styledRanges: StyledRange[] = [];
   let fullContent = '';
   let cursor = 1;
+
+  // Track paragraph ranges for background shading
+  const sourceParagraphs: { start: number; end: number }[] = [];
+  const summaryParagraphs: { start: number; end: number }[] = [];
 
   const appendPlain = (text: string) => {
     fullContent += text;
     cursor += text.length;
   };
 
+  const appendStyled = (text: string, style: StyledRange['style']) => {
+    const start = cursor;
+    fullContent += text;
+    cursor += text.length;
+    styledRanges.push({ start, end: cursor, style });
+  };
+
   const appendBoldAware = (text: string) => {
     const { cleanText, ranges } = extractBoldRanges(text, cursor);
     fullContent += cleanText;
     cursor += cleanText.length;
-    boldRanges.push(...ranges);
+    styledRanges.push(...ranges);
   };
 
-  appendPlain(`ביאור הלכתי: ${tref}\n\n`);
+  // --- Title ---
+  const titleText = `ביאור הלכתי: ${tref}\n`;
+  appendStyled(titleText, 'title');
+  appendPlain('\n');
 
+  // --- Source sections ---
   const sections = sourceResults.filter((sr) => sr.chunks.length > 0);
 
   sections.forEach((sr, sourceIndex) => {
-    appendPlain(`${sr.hebrewLabel}\n`);
-    appendPlain('--------------------\n');
+    // Section header
+    appendStyled(`${sr.hebrewLabel}\n`, 'sectionHeader');
+
+    // Separator line
+    appendStyled('━━━━━━━━━━━━━━━━━━━━\n', 'separator');
 
     sr.chunks.forEach((chunk, chunkIndex) => {
       const compactRaw = normalizeForDoc(chunk.rawText, true);
       const compactExplanation = normalizeForDoc(chunk.explanation);
 
-      appendPlain(`מקור: ${compactRaw}\n`);
-      appendBoldAware(`ביאור: ${compactExplanation}\n`);
+      // Source text with label
+      const sourceStart = cursor;
+      appendStyled('מקור: ', 'sourceLabel');
+      appendPlain(`${compactRaw}\n`);
+      sourceParagraphs.push({ start: sourceStart, end: cursor });
+
+      // Explanation
+      appendBoldAware(`${compactExplanation}\n`);
 
       if (chunkIndex < sr.chunks.length - 1) {
         appendPlain('\n');
@@ -145,16 +176,21 @@ export async function createStudyGuideDoc(
     }
   });
 
-  appendPlain('\nסיכום הלכה למעשה\n');
-  appendPlain('-----------------\n');
+  // --- Summary ---
+  appendPlain('\n');
+  appendStyled('סיכום הלכה למעשה\n', 'summaryHeader');
+  appendStyled('━━━━━━━━━━━━━━━━━━━━\n', 'separator');
 
   const compactSummary = normalizeForDoc(summary);
   if (compactSummary) {
+    const summaryStart = cursor;
     appendBoldAware(`${compactSummary}\n`);
+    summaryParagraphs.push({ start: summaryStart, end: cursor });
   } else {
     appendPlain('לא הופק סיכום.\n');
   }
 
+  // --- Build requests ---
   const requests: docs_v1.Schema$Request[] = [
     {
       insertText: {
@@ -164,57 +200,199 @@ export async function createStudyGuideDoc(
     },
   ];
 
-  if (cursor > 1) {
+  if (cursor <= 1) {
+    await docs.documents.batchUpdate({ documentId, requestBody: { requests } });
+    return { id: documentId, url: `https://docs.google.com/document/d/${documentId}/edit` };
+  }
+
+  // Global: RTL direction and base font
+  requests.push({
+    updateParagraphStyle: {
+      range: { startIndex: 1, endIndex: cursor },
+      paragraphStyle: {
+        lineSpacing: DOC_LINE_SPACING,
+        spaceAbove: { magnitude: DOC_PARAGRAPH_SPACE_PT, unit: 'PT' },
+        spaceBelow: { magnitude: DOC_PARAGRAPH_SPACE_PT, unit: 'PT' },
+        direction: 'RIGHT_TO_LEFT',
+      },
+      fields: 'lineSpacing,spaceAbove,spaceBelow,direction',
+    },
+  });
+
+  // Global: base font size and dark text color
+  requests.push({
+    updateTextStyle: {
+      range: { startIndex: 1, endIndex: cursor },
+      textStyle: {
+        fontSize: { magnitude: DOC_FONT_SIZE_PT, unit: 'PT' },
+        foregroundColor: { color: { rgbColor: COLOR_DARK } },
+      },
+      fields: 'fontSize,foregroundColor',
+    },
+  });
+
+  // Apply styled ranges
+  for (const range of styledRanges) {
+    switch (range.style) {
+      case 'title':
+        requests.push({
+          updateTextStyle: {
+            range: { startIndex: range.start, endIndex: range.end },
+            textStyle: {
+              bold: true,
+              fontSize: { magnitude: DOC_TITLE_FONT_SIZE_PT, unit: 'PT' },
+              foregroundColor: { color: { rgbColor: COLOR_PRIMARY } },
+            },
+            fields: 'bold,fontSize,foregroundColor',
+          },
+        });
+        requests.push({
+          updateParagraphStyle: {
+            range: { startIndex: range.start, endIndex: range.end },
+            paragraphStyle: {
+              alignment: 'CENTER',
+              spaceBelow: { magnitude: 8, unit: 'PT' },
+            },
+            fields: 'alignment,spaceBelow',
+          },
+        });
+        break;
+
+      case 'sectionHeader':
+        requests.push({
+          updateTextStyle: {
+            range: { startIndex: range.start, endIndex: range.end },
+            textStyle: {
+              bold: true,
+              fontSize: { magnitude: DOC_SECTION_FONT_SIZE_PT, unit: 'PT' },
+              foregroundColor: { color: { rgbColor: COLOR_PRIMARY } },
+            },
+            fields: 'bold,fontSize,foregroundColor',
+          },
+        });
+        requests.push({
+          updateParagraphStyle: {
+            range: { startIndex: range.start, endIndex: range.end },
+            paragraphStyle: {
+              spaceAbove: { magnitude: 12, unit: 'PT' },
+              borderBottom: {
+                color: { color: { rgbColor: COLOR_PRIMARY } },
+                width: { magnitude: 1, unit: 'PT' },
+                padding: { magnitude: 4, unit: 'PT' },
+                dashStyle: 'SOLID',
+              },
+            },
+            fields: 'spaceAbove,borderBottom',
+          },
+        });
+        break;
+
+      case 'summaryHeader':
+        requests.push({
+          updateTextStyle: {
+            range: { startIndex: range.start, endIndex: range.end },
+            textStyle: {
+              bold: true,
+              fontSize: { magnitude: DOC_SECTION_FONT_SIZE_PT, unit: 'PT' },
+              foregroundColor: { color: { rgbColor: COLOR_PRIMARY } },
+            },
+            fields: 'bold,fontSize,foregroundColor',
+          },
+        });
+        requests.push({
+          updateParagraphStyle: {
+            range: { startIndex: range.start, endIndex: range.end },
+            paragraphStyle: {
+              spaceAbove: { magnitude: 16, unit: 'PT' },
+              borderBottom: {
+                color: { color: { rgbColor: COLOR_PRIMARY } },
+                width: { magnitude: 2, unit: 'PT' },
+                padding: { magnitude: 4, unit: 'PT' },
+                dashStyle: 'SOLID',
+              },
+            },
+            fields: 'spaceAbove,borderBottom',
+          },
+        });
+        break;
+
+      case 'separator':
+        requests.push({
+          updateTextStyle: {
+            range: { startIndex: range.start, endIndex: range.end },
+            textStyle: {
+              foregroundColor: { color: { rgbColor: COLOR_PRIMARY } },
+              fontSize: { magnitude: 6, unit: 'PT' },
+            },
+            fields: 'foregroundColor,fontSize',
+          },
+        });
+        break;
+
+      case 'sourceLabel':
+        requests.push({
+          updateTextStyle: {
+            range: { startIndex: range.start, endIndex: range.end },
+            textStyle: {
+              bold: true,
+              foregroundColor: { color: { rgbColor: COLOR_MUTED } },
+            },
+            fields: 'bold,foregroundColor',
+          },
+        });
+        break;
+
+      case 'bold':
+        requests.push({
+          updateTextStyle: {
+            range: { startIndex: range.start, endIndex: range.end },
+            textStyle: {
+              bold: true,
+              foregroundColor: { color: { rgbColor: COLOR_PRIMARY } },
+            },
+            fields: 'bold,foregroundColor',
+          },
+        });
+        break;
+    }
+  }
+
+  // Background shading for source text paragraphs
+  for (const para of sourceParagraphs) {
     requests.push({
       updateParagraphStyle: {
-        range: {
-          startIndex: 1,
-          endIndex: cursor,
-        },
+        range: { startIndex: para.start, endIndex: para.end },
         paragraphStyle: {
-          lineSpacing: DOC_LINE_SPACING,
-          spaceAbove: {
-            magnitude: DOC_PARAGRAPH_SPACE_PT,
-            unit: 'PT',
-          },
-          spaceBelow: {
-            magnitude: DOC_PARAGRAPH_SPACE_PT,
-            unit: 'PT',
-          },
-          direction: 'RIGHT_TO_LEFT',
+          shading: { backgroundColor: { color: { rgbColor: COLOR_SOURCE_BG } } },
+          indentStart: { magnitude: 10, unit: 'PT' },
+          indentEnd: { magnitude: 10, unit: 'PT' },
         },
-        fields: 'lineSpacing,spaceAbove,spaceBelow,direction',
+        fields: 'shading,indentStart,indentEnd',
       },
     });
-
+    // Source text in darker muted color
     requests.push({
       updateTextStyle: {
-        range: {
-          startIndex: 1,
-          endIndex: cursor,
-        },
+        range: { startIndex: para.start, endIndex: para.end },
         textStyle: {
-          fontSize: {
-            magnitude: DOC_FONT_SIZE_PT,
-            unit: 'PT',
-          },
+          foregroundColor: { color: { rgbColor: COLOR_DARK } },
         },
-        fields: 'fontSize',
+        fields: 'foregroundColor',
       },
     });
   }
 
-  for (const range of boldRanges) {
+  // Light background for summary section
+  for (const para of summaryParagraphs) {
     requests.push({
-      updateTextStyle: {
-        range: {
-          startIndex: range.start,
-          endIndex: range.end,
+      updateParagraphStyle: {
+        range: { startIndex: para.start, endIndex: para.end },
+        paragraphStyle: {
+          shading: { backgroundColor: { color: { rgbColor: COLOR_SUMMARY_BG } } },
+          indentStart: { magnitude: 10, unit: 'PT' },
+          indentEnd: { magnitude: 10, unit: 'PT' },
         },
-        textStyle: {
-          bold: true,
-        },
-        fields: 'bold',
+        fields: 'shading,indentStart,indentEnd',
       },
     });
   }

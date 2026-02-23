@@ -12,14 +12,15 @@ import { generateMultiSourceStudyGuide, exportToGoogleDocs, type GenerationResul
 import { getSimanOptions, getSeifOptions, type SimanOption, type SeifOption } from '@/app/actions/sefaria-metadata';
 import type { SourceKey } from '@/lib/sefaria-api';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { useFirestore, useUser, useAuth } from '@/firebase';
 import { doc, setDoc, updateDoc } from 'firebase/firestore';
-import { initiateAnonymousSignIn } from '@/firebase/non-blocking-login';
 
 interface StudyGuideEntity {
   id: string;
   userId: string;
   tref: string;
+  sefariaRef?: string;
   language: string;
   status: 'Pending' | 'Processing' | 'Preview' | 'Published' | 'Cancelled' | 'Failed';
   summaryText: string;
@@ -70,13 +71,14 @@ export default function GeneratePage() {
   const { user, isUserLoading } = useUser();
   const auth = useAuth();
   const firestore = useFirestore();
+  const router = useRouter();
 
-  // Automatic Anonymous Auth on Start
+  // Redirect to login if not authenticated
   useEffect(() => {
-    if (!isUserLoading && !user && auth) {
-      initiateAnonymousSignIn(auth);
+    if (!isUserLoading && !user) {
+      router.push('/login');
     }
-  }, [user, isUserLoading, auth]);
+  }, [user, isUserLoading, router]);
 
   // Remove MB from selection when switching away from Orach Chayim
   useEffect(() => {
@@ -186,7 +188,8 @@ export default function GeneratePage() {
         const finalGuide: StudyGuideEntity = {
           id: studyGuideId,
           userId: user.uid,
-          tref: guideData.tref,
+          tref: displayTref,
+          sefariaRef: guideData.tref,
           language: 'he',
           status: 'Preview',
           summaryText: guideData.summary,

@@ -1,0 +1,26 @@
+2026-02-23 23:22:33,478 DEBUG    root            Loaded Command Group: ['gcloud', 'components']
+2026-02-23 23:22:33,521 DEBUG    root            Loaded Command Group: ['gcloud', 'components', 'install']
+2026-02-23 23:22:33,523 DEBUG    root            Running [gcloud.components.install] with arguments: [--quiet: "True", COMPONENT-IDS:1: "['alpha']"]
+2026-02-23 23:22:33,573 DEBUG    root            On GCE from disk cache: False
+2026-02-23 23:22:33,575 DEBUG    root            On GCE from memory cache: False
+2026-02-23 23:22:33,576 DEBUG    root            On GCE from memory cache: False
+2026-02-23 23:22:33,578 DEBUG    urllib3.connectionpool Starting new HTTPS connection (1): dl.google.com:443
+2026-02-23 23:22:34,847 DEBUG    urllib3.connectionpool https://dl.google.com:443 "GET /dl/cloudsdk/channels/rapid/components-v556.0.0.json HTTP/1.1" 200 24945
+2026-02-23 23:22:35,188 INFO     ___FILE_ONLY___ 
+
+2026-02-23 23:22:35,191 ERROR    root            Cannot use bundled Python installation to update Google Cloud CLI in
+non-interactive mode. Please run again in interactive mode.
+
+
+
+If you really want to run in non-interactive mode, please run the
+following command before re-running this one:
+
+
+
+  FOR /F "delims=" %i in ( '""C:\Users\USER\AppData\Local\Google\Cloud SDK\google-cloud-sdk\bin\gcloud.cmd"" components copy-bundled-python'
+  ) DO (
+    SET CLOUDSDK_PYTHON=%i
+  )
+
+(Substitute `%%i` for `%i` if in a .bat script.)

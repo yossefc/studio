@@ -1,0 +1,398 @@
+2026-02-23 23:22:06,260 DEBUG    root            On GCE from disk cache: False
+2026-02-23 23:22:06,261 INFO     ___FILE_ONLY___ You do not currently have this command group installed.  Using it 
+requires the installation of components: [alpha]
+
+2026-02-23 23:22:06,307 DEBUG    root            On GCE from memory cache: False
+2026-02-23 23:22:06,308 DEBUG    root            On GCE from memory cache: False
+2026-02-23 23:22:06,310 DEBUG    urllib3.connectionpool Starting new HTTPS connection (1): dl.google.com:443
+2026-02-23 23:22:06,332 DEBUG    root            HTTPSConnectionPool(host='dl.google.com', port=443): Max retries exceeded with url: /dl/cloudsdk/channels/rapid/components-v556.0.0.json (Caused by NewConnectionError("HTTPSConnection(host='dl.google.com', port=443): Failed to establish a new connection: [WinError 10013] An attempt was made to access a socket in a way forbidden by its access permissions"))
+Traceback (most recent call last):
+  File "C:\Users\USER\AppData\Local\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\third_party\urllib3\connection.py", line 206, in _new_conn
+    sock = connection.create_connection(
+        (self._dns_host, self.port),
+    ...<3 lines>...
+        google_protocol_id=self.google_protocol_id,
+    )
+  File "C:\Users\USER\AppData\Local\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\third_party\urllib3\util\connection.py", line 101, in create_connection
+    raise err
+  File "C:\Users\USER\AppData\Local\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\third_party\urllib3\util\connection.py", line 89, in create_connection
+    sock.connect(sa)
+    ~~~~~~~~~~~~^^^^
+PermissionError: [WinError 10013] An attempt was made to access a socket in a way forbidden by its access permissions
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "C:\Users\USER\AppData\Local\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\third_party\urllib3\connectionpool.py", line 787, in urlopen
+    response = self._make_request(
+        conn,
+    ...<10 lines>...
+        **response_kw,
+    )
+  File "C:\Users\USER\AppData\Local\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\third_party\urllib3\connectionpool.py", line 488, in _make_request
+    raise new_e
+  File "C:\Users\USER\AppData\Local\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\third_party\urllib3\connectionpool.py", line 464, in _make_request
+    self._validate_conn(conn)
+    ~~~~~~~~~~~~~~~~~~~^^^^^^
+  File "C:\Users\USER\AppData\Local\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\third_party\urllib3\connectionpool.py", line 1096, in _validate_conn
+    conn.connect()
+    ~~~~~~~~~~~~^^
+  File "C:\Users\USER\AppData\Local\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\third_party\urllib3\connection.py", line 764, in connect
+    self.sock = sock = self._new_conn()
+                       ~~~~~~~~~~~~~~^^
+  File "C:\Users\USER\AppData\Local\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\third_party\urllib3\connection.py", line 222, in _new_conn
+    raise NewConnectionError(
+        self, f"Failed to establish a new connection: {e}"
+    ) from e
+urllib3.exceptions.NewConnectionError: HTTPSConnection(host='dl.google.com', port=443): Failed to establish a new connection: [WinError 10013] An attempt was made to access a socket in a way forbidden by its access permissions
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "C:\Users\USER\AppData\Local\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\third_party\requests\adapters.py", line 667, in send
+    resp = conn.urlopen(
+        method=request.method,
+    ...<9 lines>...
+        chunked=chunked,
+    )
+  File "C:\Users\USER\AppData\Local\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\third_party\urllib3\connectionpool.py", line 841, in urlopen
+    retries = retries.increment(
+        method, url, error=new_e, _pool=self, _stacktrace=sys.exc_info()[2]
+    )
+  File "C:\Users\USER\AppData\Local\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\third_party\urllib3\util\retry.py", line 536, in increment
+    raise MaxRetryError(_pool, url, reason) from reason  # type: ignore[arg-type]
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+urllib3.exceptions.MaxRetryError: HTTPSConnectionPool(host='dl.google.com', port=443): Max retries exceeded with url: /dl/cloudsdk/channels/rapid/components-v556.0.0.json (Caused by NewConnectionError("HTTPSConnection(host='dl.google.com', port=443): Failed to establish a new connection: [WinError 10013] An attempt was made to access a socket in a way forbidden by its access permissions"))
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Users\USER\AppData\Local\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\calliope\cli.py", line 914, in Execute
+    args = self.__parser.parse_args(_ApplyFlagsFile(argv))
+  File "C:\Users\USER\AppData\Local\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\calliope\parser_extensions.py", line 775, in parse_args
+    namespace, unknown_args, _ = self._ParseKnownArgs(args, namespace)
+                                 ~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "C:\Users\USER\AppData\Local\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\calliope\parser_extensions.py", line 566, in _ParseKnownArgs
+    namespace, unknown_args = parser.parse_known_args(args, namespace)
+                              ~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "C:\Users\USER\AppData\Local\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\calliope\parser_extensions.py", line 738, in parse_known_args
+    namespace, unknown_args, error_context = self._ParseKnownArgs(
+                                             ~~~~~~~~~~~~~~~~~~~~^
+        args, namespace, wrapper=False)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\USER\AppData\Local\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\calliope\parser_extensions.py", line 566, in _ParseKnownArgs
+    namespace, unknown_args = parser.parse_known_args(args, namespace)
+                              ~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "C:\Users\USER\AppData\Local\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\third_party\argparse\__init__.py", line 1735, in parse_known_args
+    namespace, args = self._parse_known_args(args, namespace)
+                      ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "C:\Users\USER\AppData\Local\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\third_party\argparse\__init__.py", line 1923, in _parse_known_args
+    positionals_end_index = consume_positionals(start_index)
+  File "C:\Users\USER\AppData\Local\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\third_party\argparse\__init__.py", line 1900, in consume_positionals
+    take_action(action, args)
+    ~~~~~~~~~~~^^^^^^^^^^^^^^
+  File "C:\Users\USER\AppData\Local\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\third_party\argparse\__init__.py", line 1793, in take_action
+    argument_values = self._get_values(action, argument_strings)
+  File "C:\Users\USER\AppData\Local\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\calliope\parser_extensions.py", line 1245, in _get_values
+    return super(ArgumentParser, self)._get_values(action, arg_strings)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\USER\AppData\Local\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\third_party\argparse\__init__.py", line 2229, in _get_values
+    self._check_value(action, value[0])
+    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^
+  File "C:\Users\USER\AppData\Local\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\calliope\parser_extensions.py", line 869, in _check_value
+    update_manager.UpdateManager.EnsureInstalledAndRestart(
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        missing_components, msg=msg)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\USER\AppData\Local\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\core\updater\update_manager.py", line 276, in EnsureInstalledAndRestart
+    return manager._EnsureInstalledAndRestart(components, msg, command)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\USER\AppData\Local\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\core\updater\update_manager.py", line 1532, in _EnsureInstalledAndRestart
+    if not self.Install(components, throw_if_unattended=True,
+           ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+                        restart_args=restart_args):
+                        ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\USER\AppData\Local\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\core\updater\update_manager.py", line 958, in Install
+    return self.Update(
+           ~~~~~~~~~~~^
+        components,
+        ^^^^^^^^^^^
+        throw_if_unattended=throw_if_unattended,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        version=version,
+        ^^^^^^^^^^^^^^^^
+        restart_args=restart_args)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\USER\AppData\Local\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\core\updater\update_manager.py", line 995, in Update
+    install_state, diff = self._GetStateAndDiff(
+                          ~~~~~~~~~~~~~~~~~~~~~^
+        version=version,
+        ^^^^^^^^^^^^^^^^
+        command_path='components.update')
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\USER\AppData\Local\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\core\updater\update_manager.py", line 689, in _GetStateAndDiff
+    latest_snapshot = self._GetLatestSnapshot(version=version,
+                                              command_path=command_path)
+  File "C:\Users\USER\AppData\Local\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\core\updater\update_manager.py", line 672, in _GetLatestSnapshot
+    return snapshots.ComponentSnapshot.FromURLs(
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        *effective_url.split(','), command_path=command_path)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\USER\AppData\Local\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\core\updater\snapshots.py", line 176, in FromURLs
+    (ComponentSnapshot._DictFromURL(
+     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        url, command_path, is_extra_repo=(url != first)),
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\USER\AppData\Local\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\core\updater\snapshots.py", line 200, in _DictFromURL
+    response = installers.MakeRequest(url, command_path)
+  File "C:\Users\USER\AppData\Local\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\core\updater\installers.py", line 115, in MakeRequest
+    return _RawRequest(url, headers=headers, timeout=timeout)
+  File "C:\Users\USER\AppData\Local\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\core\updater\installers.py", line 163, in _RawRequest
+    return retryer.RetryOnException(
+           ~~~~~~~~~~~~~~~~~~~~~~~~^
+        _ExecuteRequestAndRaiseExceptions,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<2 lines>...
+        should_retry_if=RetryIf,
+        ^^^^^^^^^^^^^^^^^^^^^^^^
+        sleep_ms=500)
+        ^^^^^^^^^^^^^
+  File "C:\Users\USER\AppData\Local\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\core\util\retry.py", line 201, in RetryOnException
+    exceptions.reraise(exc_info[1], tb=exc_info[2])
+    ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\USER\AppData\Local\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\core\exceptions.py", line 149, in reraise
+    six.reraise(type(exc_value), exc_value, tb)
+    ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\USER\AppData\Local\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\third_party\six\__init__.py", line 719, in reraise
+    raise value
+  File "C:\Users\USER\AppData\Local\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\core\util\retry.py", line 182, in TryFunc
+    return func(*args, **kwargs), None
+           ~~~~^^^^^^^^^^^^^^^^^
+  File "C:\Users\USER\AppData\Local\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\core\updater\installers.py", line 196, in _ExecuteRequestAndRaiseExceptions
+    response = requests_session.get(
+        url, headers=headers, timeout=timeout, stream=True)
+  File "C:\Users\USER\AppData\Local\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\third_party\requests\sessions.py", line 602, in get
+    return self.request("GET", url, **kwargs)
+           ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\USER\AppData\Local\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\core\transport.py", line 281, in WrappedRequest
+    response = orig_request(*modified_args, **modified_kwargs)
+  File "C:\Users\USER\AppData\Local\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\core\requests.py", line 658, in WrappedRequest
+    return orig_request_method(*args, **kwargs)
+  File "C:\Users\USER\AppData\Local\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\third_party\requests\sessions.py", line 589, in request
+    resp = self.send(prep, **send_kwargs)
+  File "C:\Users\USER\AppData\Local\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\third_party\requests\sessions.py", line 703, in send
+    r = adapter.send(request, **kwargs)
+  File "C:\Users\USER\AppData\Local\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\third_party\requests\adapters.py", line 700, in send
+    raise ConnectionError(e, request=request)
+requests.exceptions.ConnectionError: HTTPSConnectionPool(host='dl.google.com', port=443): Max retries exceeded with url: /dl/cloudsdk/channels/rapid/components-v556.0.0.json (Caused by NewConnectionError("HTTPSConnection(host='dl.google.com', port=443): Failed to establish a new connection: [WinError 10013] An attempt was made to access a socket in a way forbidden by its access permissions"))
+2026-02-23 23:22:06,683 ERROR    ___FILE_ONLY___ BEGIN CRASH STACKTRACE
+Traceback (most recent call last):
+  File "C:\Users\USER\AppData\Local\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\third_party\urllib3\connection.py", line 206, in _new_conn
+    sock = connection.create_connection(
+        (self._dns_host, self.port),
+    ...<3 lines>...
+        google_protocol_id=self.google_protocol_id,
+    )
+  File "C:\Users\USER\AppData\Local\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\third_party\urllib3\util\connection.py", line 101, in create_connection
+    raise err
+  File "C:\Users\USER\AppData\Local\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\third_party\urllib3\util\connection.py", line 89, in create_connection
+    sock.connect(sa)
+    ~~~~~~~~~~~~^^^^
+PermissionError: [WinError 10013] An attempt was made to access a socket in a way forbidden by its access permissions
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "C:\Users\USER\AppData\Local\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\third_party\urllib3\connectionpool.py", line 787, in urlopen
+    response = self._make_request(
+        conn,
+    ...<10 lines>...
+        **response_kw,
+    )
+  File "C:\Users\USER\AppData\Local\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\third_party\urllib3\connectionpool.py", line 488, in _make_request
+    raise new_e
+  File "C:\Users\USER\AppData\Local\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\third_party\urllib3\connectionpool.py", line 464, in _make_request
+    self._validate_conn(conn)
+    ~~~~~~~~~~~~~~~~~~~^^^^^^
+  File "C:\Users\USER\AppData\Local\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\third_party\urllib3\connectionpool.py", line 1096, in _validate_conn
+    conn.connect()
+    ~~~~~~~~~~~~^^
+  File "C:\Users\USER\AppData\Local\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\third_party\urllib3\connection.py", line 764, in connect
+    self.sock = sock = self._new_conn()
+                       ~~~~~~~~~~~~~~^^
+  File "C:\Users\USER\AppData\Local\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\third_party\urllib3\connection.py", line 222, in _new_conn
+    raise NewConnectionError(
+        self, f"Failed to establish a new connection: {e}"
+    ) from e
+urllib3.exceptions.NewConnectionError: HTTPSConnection(host='dl.google.com', port=443): Failed to establish a new connection: [WinError 10013] An attempt was made to access a socket in a way forbidden by its access permissions
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "C:\Users\USER\AppData\Local\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\third_party\requests\adapters.py", line 667, in send
+    resp = conn.urlopen(
+        method=request.method,
+    ...<9 lines>...
+        chunked=chunked,
+    )
+  File "C:\Users\USER\AppData\Local\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\third_party\urllib3\connectionpool.py", line 841, in urlopen
+    retries = retries.increment(
+        method, url, error=new_e, _pool=self, _stacktrace=sys.exc_info()[2]
+    )
+  File "C:\Users\USER\AppData\Local\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\third_party\urllib3\util\retry.py", line 536, in increment
+    raise MaxRetryError(_pool, url, reason) from reason  # type: ignore[arg-type]
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+urllib3.exceptions.MaxRetryError: HTTPSConnectionPool(host='dl.google.com', port=443): Max retries exceeded with url: /dl/cloudsdk/channels/rapid/components-v556.0.0.json (Caused by NewConnectionError("HTTPSConnection(host='dl.google.com', port=443): Failed to establish a new connection: [WinError 10013] An attempt was made to access a socket in a way forbidden by its access permissions"))
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Users\USER\AppData\Local\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\command_lib\crash_handling.py", line 199, in Wrapper
+    target_function(*args, **kwargs)
+    ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "C:\Users\USER\AppData\Local\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\gcloud_main.py", line 191, in main
+    gcloud_cli.Execute()
+    ~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\USER\AppData\Local\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\calliope\cli.py", line 973, in Execute
+    self._HandleAllErrors(exc, command_path_string, specified_arg_names)
+    ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\USER\AppData\Local\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\calliope\cli.py", line 1017, in _HandleAllErrors
+    exceptions.HandleError(exc, command_path_string, self.__known_error_handler)
+    ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\USER\AppData\Local\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\calliope\exceptions.py", line 591, in HandleError
+    core_exceptions.reraise(exc)
+    ~~~~~~~~~~~~~~~~~~~~~~~^^^^^
+  File "C:\Users\USER\AppData\Local\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\core\exceptions.py", line 149, in reraise
+    six.reraise(type(exc_value), exc_value, tb)
+    ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\USER\AppData\Local\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\third_party\six\__init__.py", line 719, in reraise
+    raise value
+  File "C:\Users\USER\AppData\Local\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\calliope\cli.py", line 914, in Execute
+    args = self.__parser.parse_args(_ApplyFlagsFile(argv))
+  File "C:\Users\USER\AppData\Local\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\calliope\parser_extensions.py", line 775, in parse_args
+    namespace, unknown_args, _ = self._ParseKnownArgs(args, namespace)
+                                 ~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "C:\Users\USER\AppData\Local\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\calliope\parser_extensions.py", line 566, in _ParseKnownArgs
+    namespace, unknown_args = parser.parse_known_args(args, namespace)
+                              ~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "C:\Users\USER\AppData\Local\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\calliope\parser_extensions.py", line 738, in parse_known_args
+    namespace, unknown_args, error_context = self._ParseKnownArgs(
+                                             ~~~~~~~~~~~~~~~~~~~~^
+        args, namespace, wrapper=False)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\USER\AppData\Local\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\calliope\parser_extensions.py", line 566, in _ParseKnownArgs
+    namespace, unknown_args = parser.parse_known_args(args, namespace)
+                              ~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "C:\Users\USER\AppData\Local\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\third_party\argparse\__init__.py", line 1735, in parse_known_args
+    namespace, args = self._parse_known_args(args, namespace)
+                      ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "C:\Users\USER\AppData\Local\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\third_party\argparse\__init__.py", line 1923, in _parse_known_args
+    positionals_end_index = consume_positionals(start_index)
+  File "C:\Users\USER\AppData\Local\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\third_party\argparse\__init__.py", line 1900, in consume_positionals
+    take_action(action, args)
+    ~~~~~~~~~~~^^^^^^^^^^^^^^
+  File "C:\Users\USER\AppData\Local\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\third_party\argparse\__init__.py", line 1793, in take_action
+    argument_values = self._get_values(action, argument_strings)
+  File "C:\Users\USER\AppData\Local\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\calliope\parser_extensions.py", line 1245, in _get_values
+    return super(ArgumentParser, self)._get_values(action, arg_strings)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\USER\AppData\Local\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\third_party\argparse\__init__.py", line 2229, in _get_values
+    self._check_value(action, value[0])
+    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^
+  File "C:\Users\USER\AppData\Local\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\calliope\parser_extensions.py", line 869, in _check_value
+    update_manager.UpdateManager.EnsureInstalledAndRestart(
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        missing_components, msg=msg)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\USER\AppData\Local\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\core\updater\update_manager.py", line 276, in EnsureInstalledAndRestart
+    return manager._EnsureInstalledAndRestart(components, msg, command)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\USER\AppData\Local\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\core\updater\update_manager.py", line 1532, in _EnsureInstalledAndRestart
+    if not self.Install(components, throw_if_unattended=True,
+           ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+                        restart_args=restart_args):
+                        ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\USER\AppData\Local\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\core\updater\update_manager.py", line 958, in Install
+    return self.Update(
+           ~~~~~~~~~~~^
+        components,
+        ^^^^^^^^^^^
+        throw_if_unattended=throw_if_unattended,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        version=version,
+        ^^^^^^^^^^^^^^^^
+        restart_args=restart_args)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\USER\AppData\Local\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\core\updater\update_manager.py", line 995, in Update
+    install_state, diff = self._GetStateAndDiff(
+                          ~~~~~~~~~~~~~~~~~~~~~^
+        version=version,
+        ^^^^^^^^^^^^^^^^
+        command_path='components.update')
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\USER\AppData\Local\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\core\updater\update_manager.py", line 689, in _GetStateAndDiff
+    latest_snapshot = self._GetLatestSnapshot(version=version,
+                                              command_path=command_path)
+  File "C:\Users\USER\AppData\Local\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\core\updater\update_manager.py", line 672, in _GetLatestSnapshot
+    return snapshots.ComponentSnapshot.FromURLs(
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        *effective_url.split(','), command_path=command_path)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\USER\AppData\Local\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\core\updater\snapshots.py", line 176, in FromURLs
+    (ComponentSnapshot._DictFromURL(
+     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        url, command_path, is_extra_repo=(url != first)),
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\USER\AppData\Local\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\core\updater\snapshots.py", line 200, in _DictFromURL
+    response = installers.MakeRequest(url, command_path)
+  File "C:\Users\USER\AppData\Local\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\core\updater\installers.py", line 115, in MakeRequest
+    return _RawRequest(url, headers=headers, timeout=timeout)
+  File "C:\Users\USER\AppData\Local\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\core\updater\installers.py", line 163, in _RawRequest
+    return retryer.RetryOnException(
+           ~~~~~~~~~~~~~~~~~~~~~~~~^
+        _ExecuteRequestAndRaiseExceptions,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<2 lines>...
+        should_retry_if=RetryIf,
+        ^^^^^^^^^^^^^^^^^^^^^^^^
+        sleep_ms=500)
+        ^^^^^^^^^^^^^
+  File "C:\Users\USER\AppData\Local\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\core\util\retry.py", line 201, in RetryOnException
+    exceptions.reraise(exc_info[1], tb=exc_info[2])
+    ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\USER\AppData\Local\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\core\exceptions.py", line 149, in reraise
+    six.reraise(type(exc_value), exc_value, tb)
+    ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\USER\AppData\Local\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\third_party\six\__init__.py", line 719, in reraise
+    raise value
+  File "C:\Users\USER\AppData\Local\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\core\util\retry.py", line 182, in TryFunc
+    return func(*args, **kwargs), None
+           ~~~~^^^^^^^^^^^^^^^^^
+  File "C:\Users\USER\AppData\Local\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\core\updater\installers.py", line 196, in _ExecuteRequestAndRaiseExceptions
+    response = requests_session.get(
+        url, headers=headers, timeout=timeout, stream=True)
+  File "C:\Users\USER\AppData\Local\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\third_party\requests\sessions.py", line 602, in get
+    return self.request("GET", url, **kwargs)
+           ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\USER\AppData\Local\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\core\transport.py", line 281, in WrappedRequest
+    response = orig_request(*modified_args, **modified_kwargs)
+  File "C:\Users\USER\AppData\Local\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\googlecloudsdk\core\requests.py", line 658, in WrappedRequest
+    return orig_request_method(*args, **kwargs)
+  File "C:\Users\USER\AppData\Local\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\third_party\requests\sessions.py", line 589, in request
+    resp = self.send(prep, **send_kwargs)
+  File "C:\Users\USER\AppData\Local\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\third_party\requests\sessions.py", line 703, in send
+    r = adapter.send(request, **kwargs)
+  File "C:\Users\USER\AppData\Local\Google\Cloud SDK\google-cloud-sdk\bin\..\lib\third_party\requests\adapters.py", line 700, in send
+    raise ConnectionError(e, request=request)
+requests.exceptions.ConnectionError: HTTPSConnectionPool(host='dl.google.com', port=443): Max retries exceeded with url: /dl/cloudsdk/channels/rapid/components-v556.0.0.json (Caused by NewConnectionError("HTTPSConnection(host='dl.google.com', port=443): Failed to establish a new connection: [WinError 10013] An attempt was made to access a socket in a way forbidden by its access permissions"))
+2026-02-23 23:22:06,733 ERROR    root            gcloud crashed (ConnectionError): HTTPSConnectionPool(host='dl.google.com', port=443): Max retries exceeded with url: /dl/cloudsdk/channels/rapid/components-v556.0.0.json (Caused by NewConnectionError("HTTPSConnection(host='dl.google.com', port=443): Failed to establish a new connection: [WinError 10013] An attempt was made to access a socket in a way forbidden by its access permissions"))
+2026-02-23 23:22:06,734 INFO     ___FILE_ONLY___ 
+If you would like to report this issue, please run the following command:
+
+2026-02-23 23:22:06,734 INFO     ___FILE_ONLY___   gcloud feedback
+
+2026-02-23 23:22:06,734 INFO     ___FILE_ONLY___ 
+To check gcloud for common problems, please run the following command:
+
+2026-02-23 23:22:06,734 INFO     ___FILE_ONLY___   gcloud info --run-diagnostics
+

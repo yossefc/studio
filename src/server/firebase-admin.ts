@@ -33,11 +33,13 @@ function getAdminApp() {
 
   const serviceAccount = getServiceAccountFromEnv();
   if (serviceAccount) {
+    console.info(`[Firebase-Admin] Using service account for project "${serviceAccount.projectId}".`);
     return initializeApp({
       credential: cert(serviceAccount),
     });
   }
 
+  console.info('[Firebase-Admin] No service account in env, using Application Default Credentials.');
   return initializeApp({
     credential: applicationDefault(),
   });

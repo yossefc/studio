@@ -39,6 +39,15 @@ service cloud.firestore {
       allow get, list, create, update, delete: if false;
     }
 
+    match /canonicalStudyGuides/{canonicalGuideId} {
+      // Canonical cross-user guide cache is server/admin only.
+      allow get, list, create, update, delete: if false;
+
+      match /chunks/{chunkId} {
+        allow get, list, create, update, delete: if false;
+      }
+    }
+
     match /{path=**} {
       allow read, write: if false;
     }

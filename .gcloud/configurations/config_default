@@ -1,0 +1,4 @@
+[core]
+account = firebase-adminsdk-fbsvc@rabbinat-app.iam.gserviceaccount.com
+project = rabbinat-app
+

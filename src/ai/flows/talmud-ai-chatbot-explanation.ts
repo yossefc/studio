@@ -181,6 +181,9 @@ ${explanation}
       try {
         await cacheRef.set({
           id: cacheKey,
+          normalizedTref: input.normalizedTref,
+          sourceKey: input.sourceKey,
+          chunkOrder: input.chunkOrder,
           explanationText: explanation,
           modelName: modelUsed,
           promptVersion: PROMPT_VERSION,

@@ -18,7 +18,10 @@
       "Bash(git commit -m \"$\\(cat <<''EOF''\nrefactor: compact library view with single-line rows sorted by siman\n\nCo-Authored-By: Claude <noreply@anthropic.com>\nEOF\n\\)\")",
       "Bash(git push)",
       "WebSearch",
-      "WebFetch(domain:ai.google.dev)"
+      "WebFetch(domain:ai.google.dev)",
+      "Bash(timeout:*)",
+      "Bash(powershell -Command:*)",
+      "Bash(node -e:*)"
     ]
   }
 }

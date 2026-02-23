@@ -9,7 +9,7 @@ export const HEBREW_RATIO_THRESHOLD = 0.7;
 export const MAX_CHUNKS_PER_GUIDE = 30;
 
 /** Maximum number of chunks to process per individual source. */
-export const MAX_CHUNKS_PER_SOURCE = 15;
+export const MAX_CHUNKS_PER_SOURCE = 8;
 
 /** Frequency of cancellation checks (every N chunks). */
 export const CANCELLATION_CHECK_INTERVAL = 3;

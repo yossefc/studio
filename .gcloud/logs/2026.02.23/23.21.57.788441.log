@@ -1,0 +1,23 @@
+2026-02-23 23:21:57,790 DEBUG    root            Loaded Command Group: ['gcloud', 'auth']
+2026-02-23 23:21:57,794 DEBUG    root            Loaded Command Group: ['gcloud', 'auth', 'activate_service_account']
+2026-02-23 23:21:57,795 DEBUG    root            Running [gcloud.auth.activate-service-account] with arguments: [--key-file: "D:\biur\studio\rabbinat-app-firebase-adminsdk-fbsvc-153237595e.json", --project: "rabbinat-app"]
+2026-02-23 23:21:57,831 DEBUG    root            On GCE from disk cache: False
+2026-02-23 23:21:57,895 DEBUG    root            On GCE from memory cache: False
+2026-02-23 23:21:57,903 DEBUG    root            On GCE from memory cache: False
+2026-02-23 23:21:57,905 DEBUG    google.auth.transport.requests Making request: POST https://oauth2.googleapis.com/token
+2026-02-23 23:21:57,907 DEBUG    urllib3.connectionpool Starting new HTTPS connection (1): oauth2.googleapis.com:443
+2026-02-23 23:21:58,244 DEBUG    urllib3.connectionpool https://oauth2.googleapis.com:443 "POST /token HTTP/1.1" 200 None
+2026-02-23 23:21:58,274 DEBUG    google.auth.transport.requests Making request: POST https://oauth2.googleapis.com/token
+2026-02-23 23:21:58,275 DEBUG    urllib3.connectionpool Starting new HTTPS connection (1): oauth2.googleapis.com:443
+2026-02-23 23:21:58,601 DEBUG    urllib3.connectionpool https://oauth2.googleapis.com:443 "POST /token HTTP/1.1" 200 None
+2026-02-23 23:21:58,648 INFO     ___FILE_ONLY___ Activated service account credentials for: [firebase-adminsdk-fbsvc@rabbinat-app.iam.gserviceaccount.com]
+
+2026-02-23 23:21:58,657 DEBUG    root            Chosen display Format:none
+2026-02-23 23:21:58,657 INFO     root            Display format: "none"
+2026-02-23 23:21:58,701 DEBUG    root            Checking for updates...
+2026-02-23 23:21:58,703 DEBUG    root            On GCE from memory cache: False
+2026-02-23 23:21:58,705 DEBUG    root            On GCE from memory cache: False
+2026-02-23 23:21:58,707 DEBUG    urllib3.connectionpool Starting new HTTPS connection (1): dl.google.com:443
+2026-02-23 23:21:58,919 DEBUG    urllib3.connectionpool https://dl.google.com:443 "GET /dl/cloudsdk/channels/rapid/components-2.json HTTP/1.1" 200 24924
+2026-02-23 23:21:58,940 DEBUG    root            Updating notification cache...
+2026-02-23 23:21:58,940 DEBUG    root            Activating notification: [default]
