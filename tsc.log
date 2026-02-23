@@ -1,0 +1,14 @@
+
+> nextn@0.1.0 typecheck
+> tsc --noEmit
+
+src/lib/chunker.test.ts(8,1): error TS2582: Cannot find name 'describe'. Do you need to install type definitions for a test runner? Try `npm i --save-dev @types/jest` or `npm i --save-dev @types/mocha`.
+src/lib/chunker.test.ts(12,3): error TS2582: Cannot find name 'it'. Do you need to install type definitions for a test runner? Try `npm i --save-dev @types/jest` or `npm i --save-dev @types/mocha`.
+src/lib/chunker.test.ts(18,5): error TS2304: Cannot find name 'expect'.
+src/lib/chunker.test.ts(23,9): error TS2304: Cannot find name 'expect'.
+src/lib/chunker.test.ts(24,9): error TS2304: Cannot find name 'expect'.
+src/lib/chunker.test.ts(29,3): error TS2582: Cannot find name 'it'. Do you need to install type definitions for a test runner? Try `npm i --save-dev @types/jest` or `npm i --save-dev @types/mocha`.
+src/lib/chunker.test.ts(34,5): error TS2304: Cannot find name 'expect'.
+src/lib/chunker.test.ts(37,3): error TS2582: Cannot find name 'it'. Do you need to install type definitions for a test runner? Try `npm i --save-dev @types/jest` or `npm i --save-dev @types/mocha`.
+src/lib/chunker.test.ts(42,5): error TS2304: Cannot find name 'expect'.
+src/lib/chunker.test.ts(43,5): error TS2304: Cannot find name 'expect'.

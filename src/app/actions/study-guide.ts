@@ -155,9 +155,9 @@ export async function generateMultiSourceStudyGuide(
 
     const mbPromise = mbRef
       ? fetchSefariaText(mbRef, 'he').catch((err) => {
-          console.warn('[Action] Mishnah Berurah fetch failed, proceeding without:', err);
-          return null;
-        })
+        console.warn('[Action] Mishnah Berurah fetch failed, proceeding without:', err);
+        return null;
+      })
       : Promise.resolve(null);
 
     const [fetchResults, mbData] = await Promise.all([
@@ -202,31 +202,39 @@ export async function generateMultiSourceStudyGuide(
 
     const modelToUse = getEffectiveModel(totalChunkCount);
 
-    // 4. Process each source in canonical order
+    // 4. Process all sources in PARALLEL (each source still processes chunks sequentially for context)
     const sourceResults: SourceResult[] = [];
 
-    for (const sourceKey of SOURCE_PROCESSING_ORDER) {
-      const entry = sourceChunkMap.get(sourceKey);
-      if (!entry) continue;
+    const sourceProcessingPromises = SOURCE_PROCESSING_ORDER
+      .filter(sourceKey => sourceChunkMap.has(sourceKey))
+      .map(async (sourceKey) => {
+        const entry = sourceChunkMap.get(sourceKey)!;
+        const { chunks: rawChunks, tref } = entry;
+        const config = SOURCE_CONFIGS[sourceKey];
 
-      const { chunks: rawChunks, tref } = entry;
-      const config = SOURCE_CONFIGS[sourceKey];
+        const result = await processSourceChunks(
+          rawChunks,
+          tref,
+          sourceKey,
+          modelToUse,
+          userId,
+          guideId,
+          companionText,
+        );
 
-      const result = await processSourceChunks(
-        rawChunks,
-        tref,
-        sourceKey,
-        modelToUse,
-        userId,
-        guideId,
-        companionText,
-      );
+        return { sourceKey, result, tref, config };
+      });
 
+    const parallelResults = await Promise.all(sourceProcessingPromises);
+
+    let cancelled = false;
+    for (const { sourceKey, result, tref, config } of parallelResults) {
       totalCacheHits += result.cacheHits;
 
       if (result.cancelled) {
         console.info(`[Action-Cancel] Stopped at source ${sourceKey} for user ${userId}`);
-        return { success: false, cancelled: true };
+        cancelled = true;
+        break;
       }
 
       if (result.chunks.length > 0) {
@@ -241,6 +249,10 @@ export async function generateMultiSourceStudyGuide(
           chunks: result.chunks,
         });
       }
+    }
+
+    if (cancelled) {
+      return { success: false, cancelled: true };
     }
 
     if (sourceResults.length === 0) {

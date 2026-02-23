@@ -3,7 +3,7 @@ import { googleAI } from '@genkit-ai/google-genai';
 
 export const ai = genkit({
   plugins: [googleAI()],
-  model: process.env.GEMINI_MODEL_PRIMARY || 'googleai/gemini-3.5-pro',
+  model: process.env.GEMINI_MODEL_PRIMARY || 'googleai/gemini-2.5-pro',
 });
 
 export type ModelConfig = {
@@ -16,9 +16,9 @@ export type ModelConfig = {
 
 export function getModelConfig() {
   return {
-    primary: process.env.GEMINI_MODEL_PRIMARY || 'googleai/gemini-3.5-pro',
-    cost: process.env.GEMINI_MODEL_COST || 'googleai/gemini-3.1-pro',
-    fallback: process.env.GEMINI_MODEL_FALLBACK || 'googleai/gemini-2.5-pro',
+    primary: process.env.GEMINI_MODEL_PRIMARY || 'googleai/gemini-2.5-pro',
+    cost: process.env.GEMINI_MODEL_COST || 'googleai/gemini-2.5-flash',
+    fallback: process.env.GEMINI_MODEL_FALLBACK || 'googleai/gemini-2.5-flash-lite',
     useBatch: process.env.GEMINI_USE_BATCH === 'true',
     batchThreshold: Number(process.env.GEMINI_BATCH_THRESHOLD || '5'),
   };
@@ -27,7 +27,7 @@ export function getModelConfig() {
 export function getModelCandidates(preferredModel?: string): string[] {
   const config = getModelConfig();
   const preferred = preferredModel || config.primary;
-  // Order: preferred → cost (gemini-3.1-pro) → fallback (gemini-2.5-pro)
+  // Order: preferred → cost (gemini-2.5-flash) → fallback (gemini-2.5-flash-lite)
   const candidates = [preferred, config.cost, config.fallback].filter(Boolean);
   return Array.from(new Set(candidates));
 }
