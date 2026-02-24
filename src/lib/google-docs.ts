@@ -5,7 +5,12 @@
 import { google, docs_v1 } from 'googleapis';
 import type { SourceResult } from '@/app/actions/study-guide';
 
-type StyledRange = { start: number; end: number; style: 'bold' | 'title' | 'sectionHeader' | 'sourceLabel' | 'sourceText' | 'summaryHeader' | 'separator' };
+type StyledRange = {
+  start: number;
+  end: number;
+  style: 'bold' | 'title' | 'sectionHeader' | 'sourceLabel' | 'sourceText' | 'summaryHeader' | 'separator';
+  sourceKey?: SourceResult['sourceKey'];
+};
 
 const DOC_FONT_SIZE_PT = 11;
 const DOC_TITLE_FONT_SIZE_PT = 18;
@@ -17,8 +22,33 @@ const DOC_PARAGRAPH_SPACE_PT = 3;
 const COLOR_PRIMARY = { red: 52 / 255, green: 107 / 255, blue: 191 / 255 };       // #346DBF
 const COLOR_DARK = { red: 24 / 255, green: 38 / 255, blue: 71 / 255 };            // #182647
 const COLOR_SOURCE_BG = { red: 242 / 255, green: 247 / 255, blue: 250 / 255 };    // #F2F7FA
-const COLOR_MUTED = { red: 104 / 255, green: 120 / 255, blue: 141 / 255 };        // #68788D
 const COLOR_SUMMARY_BG = { red: 235 / 255, green: 242 / 255, blue: 252 / 255 };   // #EBF2FC
+
+const SOURCE_PALETTE: Record<SourceResult['sourceKey'], { accent: typeof COLOR_PRIMARY; softBg: typeof COLOR_SOURCE_BG }> = {
+  tur: {
+    accent: { red: 166 / 255, green: 109 / 255, blue: 31 / 255 },      // #A66D1F
+    softBg: { red: 252 / 255, green: 245 / 255, blue: 230 / 255 },      // #FCF5E6
+  },
+  beit_yosef: {
+    accent: { red: 23 / 255, green: 115 / 255, blue: 107 / 255 },       // #17736B
+    softBg: { red: 231 / 255, green: 248 / 255, blue: 245 / 255 },       // #E7F8F5
+  },
+  shulchan_arukh: {
+    accent: COLOR_PRIMARY,
+    softBg: COLOR_SOURCE_BG,
+  },
+  mishnah_berurah: {
+    accent: { red: 11 / 255, green: 124 / 255, blue: 88 / 255 },         // #0B7C58
+    softBg: { red: 229 / 255, green: 247 / 255, blue: 240 / 255 },       // #E5F7F0
+  },
+};
+
+function getSourcePalette(sourceKey?: SourceResult['sourceKey']) {
+  if (!sourceKey) {
+    return { accent: COLOR_PRIMARY, softBg: COLOR_SOURCE_BG };
+  }
+  return SOURCE_PALETTE[sourceKey] || { accent: COLOR_PRIMARY, softBg: COLOR_SOURCE_BG };
+}
 
 function extractBoldRanges(text: string, startIndex: number): { cleanText: string; ranges: StyledRange[] } {
   let i = 0;
@@ -116,7 +146,7 @@ export async function createStudyGuideDoc(
   let cursor = 1;
 
   // Track paragraph ranges for background shading
-  const sourceParagraphs: { start: number; end: number }[] = [];
+  const sourceParagraphs: { start: number; end: number; sourceKey: SourceResult['sourceKey'] }[] = [];
   const summaryParagraphs: { start: number; end: number }[] = [];
 
   const appendPlain = (text: string) => {
@@ -124,11 +154,11 @@ export async function createStudyGuideDoc(
     cursor += text.length;
   };
 
-  const appendStyled = (text: string, style: StyledRange['style']) => {
+  const appendStyled = (text: string, style: StyledRange['style'], sourceKey?: SourceResult['sourceKey']) => {
     const start = cursor;
     fullContent += text;
     cursor += text.length;
-    styledRanges.push({ start, end: cursor, style });
+    styledRanges.push({ start, end: cursor, style, sourceKey });
   };
 
   const appendBoldAware = (text: string) => {
@@ -148,10 +178,10 @@ export async function createStudyGuideDoc(
 
   sections.forEach((sr, sourceIndex) => {
     // Section header
-    appendStyled(`${sr.hebrewLabel}\n`, 'sectionHeader');
+    appendStyled(`${sr.hebrewLabel}\n`, 'sectionHeader', sr.sourceKey);
 
     // Separator line
-    appendStyled('━━━━━━━━━━━━━━━━━━━━\n', 'separator');
+    appendStyled('--------------------\n', 'separator', sr.sourceKey);
 
     sr.chunks.forEach((chunk, chunkIndex) => {
       const compactRaw = normalizeForDoc(chunk.rawText, true);
@@ -159,9 +189,9 @@ export async function createStudyGuideDoc(
 
       // Source text with label
       const sourceStart = cursor;
-      appendStyled('מקור: ', 'sourceLabel');
+      appendStyled('מקור: ', 'sourceLabel', sr.sourceKey);
       appendPlain(`${compactRaw}\n`);
-      sourceParagraphs.push({ start: sourceStart, end: cursor });
+      sourceParagraphs.push({ start: sourceStart, end: cursor, sourceKey: sr.sourceKey });
 
       // Explanation
       appendBoldAware(`${compactExplanation}\n`);
@@ -179,7 +209,7 @@ export async function createStudyGuideDoc(
   // --- Summary ---
   appendPlain('\n');
   appendStyled('סיכום הלכה למעשה\n', 'summaryHeader');
-  appendStyled('━━━━━━━━━━━━━━━━━━━━\n', 'separator');
+  appendStyled('--------------------\n', 'separator');
 
   const compactSummary = normalizeForDoc(summary);
   if (compactSummary) {
@@ -258,14 +288,15 @@ export async function createStudyGuideDoc(
         });
         break;
 
-      case 'sectionHeader':
+      case 'sectionHeader': {
+        const sectionPalette = getSourcePalette(range.sourceKey);
         requests.push({
           updateTextStyle: {
             range: { startIndex: range.start, endIndex: range.end },
             textStyle: {
               bold: true,
               fontSize: { magnitude: DOC_SECTION_FONT_SIZE_PT, unit: 'PT' },
-              foregroundColor: { color: { rgbColor: COLOR_PRIMARY } },
+              foregroundColor: { color: { rgbColor: sectionPalette.accent } },
             },
             fields: 'bold,fontSize,foregroundColor',
           },
@@ -276,7 +307,7 @@ export async function createStudyGuideDoc(
             paragraphStyle: {
               spaceAbove: { magnitude: 12, unit: 'PT' },
               borderBottom: {
-                color: { color: { rgbColor: COLOR_PRIMARY } },
+                color: { color: { rgbColor: sectionPalette.accent } },
                 width: { magnitude: 1, unit: 'PT' },
                 padding: { magnitude: 4, unit: 'PT' },
                 dashStyle: 'SOLID',
@@ -286,6 +317,7 @@ export async function createStudyGuideDoc(
           },
         });
         break;
+      }
 
       case 'summaryHeader':
         requests.push({
@@ -316,31 +348,35 @@ export async function createStudyGuideDoc(
         });
         break;
 
-      case 'separator':
+      case 'separator': {
+        const separatorPalette = getSourcePalette(range.sourceKey);
         requests.push({
           updateTextStyle: {
             range: { startIndex: range.start, endIndex: range.end },
             textStyle: {
-              foregroundColor: { color: { rgbColor: COLOR_PRIMARY } },
+              foregroundColor: { color: { rgbColor: separatorPalette.accent } },
               fontSize: { magnitude: 6, unit: 'PT' },
             },
             fields: 'foregroundColor,fontSize',
           },
         });
         break;
+      }
 
-      case 'sourceLabel':
+      case 'sourceLabel': {
+        const sourceLabelPalette = getSourcePalette(range.sourceKey);
         requests.push({
           updateTextStyle: {
             range: { startIndex: range.start, endIndex: range.end },
             textStyle: {
               bold: true,
-              foregroundColor: { color: { rgbColor: COLOR_MUTED } },
+              foregroundColor: { color: { rgbColor: sourceLabelPalette.accent } },
             },
             fields: 'bold,foregroundColor',
           },
         });
         break;
+      }
 
       case 'bold':
         requests.push({
@@ -348,9 +384,8 @@ export async function createStudyGuideDoc(
             range: { startIndex: range.start, endIndex: range.end },
             textStyle: {
               bold: true,
-              foregroundColor: { color: { rgbColor: COLOR_PRIMARY } },
             },
-            fields: 'bold,foregroundColor',
+            fields: 'bold',
           },
         });
         break;
@@ -359,11 +394,12 @@ export async function createStudyGuideDoc(
 
   // Background shading for source text paragraphs
   for (const para of sourceParagraphs) {
+    const sourcePalette = getSourcePalette(para.sourceKey);
     requests.push({
       updateParagraphStyle: {
         range: { startIndex: para.start, endIndex: para.end },
         paragraphStyle: {
-          shading: { backgroundColor: { color: { rgbColor: COLOR_SOURCE_BG } } },
+          shading: { backgroundColor: { color: { rgbColor: sourcePalette.softBg } } },
           indentStart: { magnitude: 10, unit: 'PT' },
           indentEnd: { magnitude: 10, unit: 'PT' },
         },
@@ -375,7 +411,7 @@ export async function createStudyGuideDoc(
       updateTextStyle: {
         range: { startIndex: para.start, endIndex: para.end },
         textStyle: {
-          foregroundColor: { color: { rgbColor: COLOR_DARK } },
+          foregroundColor: { color: { rgbColor: sourcePalette.accent } },
         },
         fields: 'foregroundColor',
       },

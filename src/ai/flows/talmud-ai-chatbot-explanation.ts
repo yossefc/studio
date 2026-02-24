@@ -53,7 +53,38 @@ function validateHebrewOutput(text: string): boolean {
   return hebrewChars.length / Math.max(text.length, 1) >= HEBREW_RATIO_THRESHOLD;
 }
 
-function generateCacheKey(input: TalmudAIChatbotExplanationInput, modelName: string): string {
+/* ---- Tref → Firestore path ---- */
+
+const SECTION_KEY_MAP: Record<string, string> = {
+  'shulchan arukh, orach chayim': 'orach_chayim',
+  'orach chayim': 'orach_chayim',
+  'shulchan arukh, yoreh deah': 'yoreh_deah',
+  'yoreh deah': 'yoreh_deah',
+  'shulchan arukh, even haezer': 'even_haezer',
+  'even haezer': 'even_haezer',
+  'shulchan arukh, choshen mishpat': 'choshen_mishpat',
+  'choshen mishpat': 'choshen_mishpat',
+};
+
+function parseTrefForPath(normalizedTref: string): { sectionKey: string; siman: string; seif: string } {
+  const match = normalizedTref.match(/^(.+?)\s+(\d+)(?::(\d+))?$/);
+  if (!match) return { sectionKey: 'unknown', siman: '0', seif: '0' };
+  const sectionEng = match[1].trim().toLowerCase();
+  return {
+    sectionKey: SECTION_KEY_MAP[sectionEng] || sectionEng.replace(/[^a-z0-9]+/g, '_'),
+    siman: match[2],
+    seif: match[3] || '0',
+  };
+}
+
+/** Build Firestore path for the new rabanout structure. */
+function rabanutDocPath(input: { normalizedTref: string; sourceKey: string; chunkOrder: number }): string {
+  const { sectionKey, siman, seif } = parseTrefForPath(input.normalizedTref);
+  return `rabanout/${sectionKey}/simanim/${siman}/seifim/${seif}/${input.sourceKey}/${input.chunkOrder}`;
+}
+
+/** Legacy hash-based cache key (for reading old entries). */
+function generateLegacyCacheKey(input: TalmudAIChatbotExplanationInput, modelName: string): string {
   const data = `${input.sourceKey}|${input.normalizedTref}|${input.chunkOrder}|${input.rawHash}|${PROMPT_VERSION}|${modelName}`;
   return createHash('sha256').update(data).digest('hex');
 }
@@ -77,22 +108,56 @@ export const talmudAIChatbotExplanationFlow = ai.defineFlow(
     const preferredModel = input.modelName || config.primary;
     const candidates = getModelCandidates(preferredModel);
 
-    for (const candidateModel of candidates) {
-      const cacheKey = generateCacheKey(input, candidateModel);
-      const cacheRef = firestore.collection('explanationCacheEntries').doc(cacheKey);
+    // --- 1) Check NEW rabanout structure first ---
+    const rabanutPath = rabanutDocPath(input);
+    try {
+      const rabanutSnap = await firestore.doc(rabanutPath).get();
+      if (rabanutSnap.exists) {
+        const data = rabanutSnap.data();
+        if (data?.explanationText && data?.rawHash === input.rawHash && data?.promptVersion === PROMPT_VERSION) {
+          console.info(`[Flow-Cache] Rabanout hit chunk=${input.chunkOrder} tref=${input.normalizedTref}`);
+          return {
+            explanation: data.explanationText,
+            modelUsed: data.modelName || 'cached',
+            cacheHit: true,
+            promptVersion: data.promptVersion,
+            validated: data.validated ?? true,
+            durationMs: Date.now() - startTime,
+          };
+        }
+      }
+    } catch (error) {
+      console.warn('[Flow-Cache] Rabanout read error:', error);
+    }
 
+    // --- 2) Fallback: check legacy explanationCacheEntries ---
+    for (const candidateModel of candidates) {
+      const cacheKey = generateLegacyCacheKey(input, candidateModel);
+      const cacheRef = firestore.collection('explanationCacheEntries').doc(cacheKey);
       try {
         const cacheSnap = await cacheRef.get();
-        if (!cacheSnap.exists) {
-          continue;
-        }
-
+        if (!cacheSnap.exists) continue;
         const data = cacheSnap.data();
-        if (!data?.explanationText || !data?.modelName) {
-          continue;
-        }
+        if (!data?.explanationText || !data?.modelName) continue;
 
-        console.info(`[Flow-Cache] Hit chunk=${input.chunkOrder} tref=${input.normalizedTref} model=${data.modelName}`);
+        console.info(`[Flow-Cache] Legacy hit chunk=${input.chunkOrder} tref=${input.normalizedTref} model=${data.modelName}`);
+
+        // Migrate to new structure
+        try {
+          await firestore.doc(rabanutPath).set({
+            rawText: input.currentSegment,
+            explanationText: data.explanationText,
+            rawHash: input.rawHash,
+            sourceKey: input.sourceKey,
+            chunkOrder: input.chunkOrder,
+            modelName: data.modelName,
+            promptVersion: data.promptVersion || PROMPT_VERSION,
+            validated: data.validated ?? true,
+            createdAt: FieldValue.serverTimestamp(),
+            updatedAt: FieldValue.serverTimestamp(),
+          });
+        } catch (e) { console.warn('[Flow-Cache] Migration write error:', e); }
+
         return {
           explanation: data.explanationText,
           modelUsed: data.modelName,
@@ -102,7 +167,7 @@ export const talmudAIChatbotExplanationFlow = ai.defineFlow(
           durationMs: Date.now() - startTime,
         };
       } catch (error) {
-        console.warn('[Flow-Cache] Read error:', error);
+        console.warn('[Flow-Cache] Legacy read error:', error);
       }
     }
 
@@ -167,33 +232,22 @@ ${explanation}
       validated = validateHebrewOutput(explanation);
     }
 
-    // Write cache entry keyed by the model that actually produced the result.
-    // Also write under the preferred model key if different, so future lookups
-    // with the preferred model hit the cache without needing to iterate candidates.
-    const cacheKeysToWrite = new Set<string>();
-    cacheKeysToWrite.add(generateCacheKey(input, modelUsed));
-    if (modelUsed !== preferredModel) {
-      cacheKeysToWrite.add(generateCacheKey(input, preferredModel));
-    }
-
-    for (const cacheKey of cacheKeysToWrite) {
-      const cacheRef = firestore.collection('explanationCacheEntries').doc(cacheKey);
-      try {
-        await cacheRef.set({
-          id: cacheKey,
-          normalizedTref: input.normalizedTref,
-          sourceKey: input.sourceKey,
-          chunkOrder: input.chunkOrder,
-          explanationText: explanation,
-          modelName: modelUsed,
-          promptVersion: PROMPT_VERSION,
-          validated,
-          createdAt: FieldValue.serverTimestamp(),
-          updatedAt: FieldValue.serverTimestamp(),
-        }, { merge: true });
-      } catch (error) {
-        console.error('[Flow-Cache] Write error:', error);
-      }
+    // --- Write to NEW rabanout structure ---
+    try {
+      await firestore.doc(rabanutPath).set({
+        rawText: input.currentSegment,
+        explanationText: explanation,
+        rawHash: input.rawHash,
+        sourceKey: input.sourceKey,
+        chunkOrder: input.chunkOrder,
+        modelName: modelUsed,
+        promptVersion: PROMPT_VERSION,
+        validated,
+        createdAt: FieldValue.serverTimestamp(),
+        updatedAt: FieldValue.serverTimestamp(),
+      });
+    } catch (error) {
+      console.error('[Flow-Cache] Rabanout write error:', error);
     }
 
     const durationMs = Date.now() - startTime;

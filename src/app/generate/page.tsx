@@ -46,6 +46,25 @@ const SOURCE_OPTIONS: { key: SourceKey; label: string; onlyOC: boolean }[] = [
   { key: 'mishnah_berurah', label: 'משנה ברורה', onlyOC: true },
 ];
 
+const SOURCE_THEME: Record<SourceKey, { headerClass: string; sourceCardClass: string }> = {
+  tur: {
+    headerClass: 'text-amber-700 border-amber-300',
+    sourceCardClass: 'bg-amber-50 border border-amber-200 text-amber-900',
+  },
+  beit_yosef: {
+    headerClass: 'text-teal-700 border-teal-300',
+    sourceCardClass: 'bg-teal-50 border border-teal-200 text-teal-900',
+  },
+  shulchan_arukh: {
+    headerClass: 'text-blue-700 border-blue-300',
+    sourceCardClass: 'bg-blue-50 border border-blue-200 text-blue-900',
+  },
+  mishnah_berurah: {
+    headerClass: 'text-emerald-700 border-emerald-300',
+    sourceCardClass: 'bg-emerald-50 border border-emerald-200 text-emerald-900',
+  },
+};
+
 export default function GeneratePage() {
   const [section, setSection] = useState('Orach Chayim');
   const [siman, setSiman] = useState('1');
@@ -448,27 +467,30 @@ export default function GeneratePage() {
 
             <Card className="p-8 space-y-8 bg-card shadow-lg rounded-[2rem]">
               {/* Per-source sections */}
-              {previewSourceResults.map((sr) => (
-                <div key={sr.sourceKey} className="space-y-6">
-                  <h2 className="text-2xl font-bold text-primary border-b pb-2">
-                    {sr.hebrewLabel}
-                  </h2>
-                  <div className="space-y-8">
-                    {sr.chunks.map((chunk, index) => (
-                      <div key={index} className="space-y-2 pb-6 border-b last:border-0 border-muted">
-                        <p className="text-lg bg-muted/50 p-4 rounded-xl text-foreground font-semibold">
-                          {chunk.rawText}
-                        </p>
-                        <p className="text-lg text-foreground px-2 whitespace-pre-wrap">
-                          {chunk.explanation.split('**').map((text, i) =>
-                            i % 2 === 1 ? <strong key={i} className="text-primary">{text}</strong> : text
-                          )}
-                        </p>
-                      </div>
-                    ))}
+              {previewSourceResults.map((sr) => {
+                const theme = SOURCE_THEME[sr.sourceKey] || SOURCE_THEME.shulchan_arukh;
+                return (
+                  <div key={sr.sourceKey} className="space-y-6">
+                    <h2 className={`text-2xl font-bold border-b pb-2 ${theme.headerClass}`}>
+                      {sr.hebrewLabel}
+                    </h2>
+                    <div className="space-y-8">
+                      {sr.chunks.map((chunk, index) => (
+                        <div key={index} className="space-y-2 pb-6 border-b last:border-0 border-muted">
+                          <p className={`text-lg p-4 rounded-xl font-semibold ${theme.sourceCardClass}`}>
+                            {chunk.rawText}
+                          </p>
+                          <p className="text-lg text-black px-2 whitespace-pre-wrap">
+                            {chunk.explanation.split('**').map((text, i) =>
+                              i % 2 === 1 ? <strong key={i} className="text-black font-bold">{text}</strong> : text
+                            )}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
 
               {/* Summary - styled as a study card */}
               <div className="pt-8 border-t-2 border-primary/30">
