@@ -8,6 +8,14 @@ export type TextChunk = {
   id: string;
   text: string;
   rawHash: string;
+  ref?: string;
+  path?: number[];
+};
+
+export type StructuredChunk = {
+  ref: string;
+  path?: number[];
+  text: string;
 };
 
 /**
@@ -29,56 +37,90 @@ function generateHash(text: string): string {
   return (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(16);
 }
 
-/**
- * Splits text into chunks of 120-180 words, attempting to break at sentence boundaries.
- */
-export function chunkText(fullText: string, tref: string, source: string): TextChunk[] {
-  const words = fullText.split(/\s+/).filter(Boolean);
-  const chunks: TextChunk[] = [];
+const MIN_WORDS_PER_CHUNK = 120;
+const MAX_WORDS_PER_CHUNK = 180;
+
+function splitByWordBudget(text: string, minWords = MIN_WORDS_PER_CHUNK, maxWords = MAX_WORDS_PER_CHUNK): string[] {
+  const words = text.split(/\s+/).filter(Boolean);
+  if (words.length <= maxWords) {
+    return [text.trim()];
+  }
+
+  const parts: string[] = [];
   let currentWords: string[] = [];
 
-  const minWords = 120;
-  const maxWords = 180;
-
-  // Derive a short section prefix from the tref (e.g. "Shulchan Arukh, Orach Chayim 1.1" → "OC").
-  const sectionPrefixes: Record<string, string> = {
-    'orach chayim': 'OC',
-    'yoreh deah': 'YD',
-    'even haezer': 'EH',
-    'choshen mishpat': 'CM',
-  };
-  const trefLower = tref.toLowerCase();
-  const sectionPrefix = Object.entries(sectionPrefixes).find(([key]) => trefLower.includes(key))?.[1] ?? 'GEN';
-
-  // Extract trailing numeric reference part (e.g. "1:1" => "1_1").
-  const refParts = tref.split(' ');
-  const numericRef = (refParts[refParts.length - 1] || '0_0').replace(/[:.]/g, '_');
-
-  const createChunk = (text: string, index: number): TextChunk => {
-    const cleanText = text.trim();
-    return {
-      id: `${sectionPrefix}_${numericRef}_${source}_chunk_${index + 1}`,
-      text: cleanText,
-      rawHash: generateHash(cleanText),
-    };
-  };
-
-  for (let i = 0; i < words.length; i++) {
-    const word = words[i];
+  for (const word of words) {
     currentWords.push(word);
 
     const wordCount = currentWords.length;
-    const isPunctuation = /[\u05C3.:?!]/.test(word);
-
-    if (wordCount >= minWords && (isPunctuation || wordCount >= maxWords)) {
-      chunks.push(createChunk(currentWords.join(' '), chunks.length));
+    const isSentenceBoundary = /[\u05C3.:?!]/.test(word);
+    if (wordCount >= minWords && (isSentenceBoundary || wordCount >= maxWords)) {
+      parts.push(currentWords.join(' ').trim());
       currentWords = [];
     }
   }
 
   if (currentWords.length > 0) {
-    chunks.push(createChunk(currentWords.join(' '), chunks.length));
+    parts.push(currentWords.join(' ').trim());
+  }
+
+  return parts.filter(Boolean);
+}
+
+function normalizeRefKey(ref: string): string {
+  const normalized = ref
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '');
+
+  if (!normalized) {
+    return 'ref';
+  }
+
+  return normalized.length <= 64 ? normalized : normalized.slice(-64);
+}
+
+function buildChunkId(source: string, ref: string, path: number[] | undefined, index: number): string {
+  const refPart = normalizeRefKey(ref);
+  const pathPart = path && path.length ? path.join('_') : 'root';
+  return `${source}_${refPart}_${pathPart}_chunk_${index + 1}`;
+}
+
+/**
+ * Chunks structured Sefaria segments. Each logical segment is preserved as-is unless it exceeds 180 words.
+ * In that case, it is split into 120-180 word sub-chunks while preserving the parent reference metadata.
+ */
+export function chunkStructuredText(segments: StructuredChunk[], source: string): TextChunk[] {
+  const chunks: TextChunk[] = [];
+
+  for (const segment of segments) {
+    const cleanText = segment.text.trim();
+    if (!cleanText) {
+      continue;
+    }
+
+    const parts = splitByWordBudget(cleanText);
+    for (const part of parts) {
+      chunks.push({
+        id: buildChunkId(source, segment.ref, segment.path, chunks.length),
+        text: part,
+        rawHash: generateHash(part),
+        ref: segment.ref,
+        path: segment.path,
+      });
+    }
   }
 
   return chunks;
+}
+
+/**
+ * Backward-compatible entry point for plain text.
+ */
+export function chunkText(fullText: string, tref: string, source: string): TextChunk[] {
+  const segment: StructuredChunk = {
+    ref: tref,
+    text: fullText,
+  };
+  return chunkStructuredText([segment], source);
 }

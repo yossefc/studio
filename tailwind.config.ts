@@ -13,6 +13,7 @@ export default {
       fontFamily: {
         body: ['Assistant', 'sans-serif'],
         headline: ['Heebo', 'sans-serif'],
+        sefer: ['"Frank Ruhl Libre"', 'David', '"Frank Ruehl CLM"', 'serif'],
         code: ['monospace'],
       },
       colors: {

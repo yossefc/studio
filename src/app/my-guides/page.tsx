@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
   FileText, ExternalLink, Plus, Search, ChevronDown, ChevronLeft,
-  Book, X, Loader2,
+  Book, X, Loader2, Printer
 } from 'lucide-react';
 import Link from 'next/link';
 import { useFirestore, useUser, useCollection, useMemoFirebase } from '@/firebase';
@@ -187,7 +187,7 @@ function buildHierarchy(guides: (StudyGuideEntity & { id: string })[]): SectionG
 }
 
 /* ------------------------------------------------------------------ */
-/*  Source label map                                                   */
+/*  Source labels & themes                                              */
 /* ------------------------------------------------------------------ */
 
 const SOURCE_LABELS: Record<string, string> = {
@@ -195,6 +195,29 @@ const SOURCE_LABELS: Record<string, string> = {
   beit_yosef: 'בית יוסף',
   shulchan_arukh: 'שולחן ערוך',
   mishnah_berurah: 'משנה ברורה',
+};
+
+const SOURCE_THEME: Record<string, { headerClass: string; sourceCardClass: string; accentClass: string }> = {
+  tur: {
+    headerClass: 'text-amber-700 border-amber-300',
+    sourceCardClass: 'bg-amber-50 border border-amber-200 text-amber-900',
+    accentClass: 'text-amber-700',
+  },
+  beit_yosef: {
+    headerClass: 'text-teal-700 border-teal-300',
+    sourceCardClass: 'bg-teal-50 border border-teal-200 text-teal-900',
+    accentClass: 'text-teal-700',
+  },
+  shulchan_arukh: {
+    headerClass: 'text-blue-700 border-blue-300',
+    sourceCardClass: 'bg-blue-50 border border-blue-200 text-blue-900',
+    accentClass: 'text-blue-700',
+  },
+  mishnah_berurah: {
+    headerClass: 'text-emerald-700 border-emerald-300',
+    sourceCardClass: 'bg-emerald-50 border border-emerald-200 text-emerald-900',
+    accentClass: 'text-emerald-700',
+  },
 };
 
 /* ------------------------------------------------------------------ */
@@ -226,10 +249,20 @@ export default function MyGuidesPage() {
 
   const { data: guides, isLoading: isDataLoading } = useCollection<StudyGuideEntity>(guidesQuery);
 
-  // Filter + group
+  // Filter + group + deduplicate
   const hierarchy = useMemo(() => {
     if (!guides) return [];
-    const filtered = guides.filter(g =>
+
+    // Deduplicate by tref, keeping the newest one (since guides are sorted desc)
+    const uniqueGuidesMap = new Map<string, StudyGuideEntity & { id: string }>();
+    for (const g of guides) {
+      if (!uniqueGuidesMap.has(g.tref)) {
+        uniqueGuidesMap.set(g.tref, g);
+      }
+    }
+    const uniqueGuides = Array.from(uniqueGuidesMap.values());
+
+    const filtered = uniqueGuides.filter(g =>
       g.tref.includes(searchTerm) ||
       g.summaryText?.includes(searchTerm)
     );
@@ -295,7 +328,7 @@ export default function MyGuidesPage() {
   /* ---------------------------------------------------------------- */
 
   return (
-    <div className="min-h-screen bg-background pb-32">
+    <div className="min-h-screen bg-background pb-32 select-none">
       <Navigation />
       <main className="pt-24 px-6 max-w-4xl mx-auto w-full">
         {/* Header */}
@@ -452,58 +485,157 @@ export default function MyGuidesPage() {
                                               לא נמצאו קטעים שמורים עבור מדריך זה.
                                             </div>
                                           ) : (
-                                            <div className="p-5 space-y-6 max-h-[60vh] overflow-y-auto">
-                                              {/* Close button */}
-                                              <div className="flex items-center justify-between">
+                                            <div className="p-5 space-y-6 max-h-[60vh] overflow-y-auto print:max-h-none print:overflow-visible print:absolute print:inset-0 print:bg-white print:z-50 print:p-8">
+                                              {/* Close button & Print button */}
+                                              <div className="flex items-center justify-between print:hidden">
                                                 <h3 className="text-lg font-bold text-primary">
                                                   ביאור — {activeGuide?.tref}
                                                 </h3>
-                                                <button
-                                                  onClick={() => { setActiveGuideId(null); setActiveGuide(null); setChunks([]); }}
-                                                  className="p-1.5 rounded-lg hover:bg-muted/50 transition-colors"
-                                                >
-                                                  <X className="w-4 h-4 text-muted-foreground" />
-                                                </button>
+                                                <div className="flex items-center gap-2">
+                                                  <button
+                                                    onClick={() => window.print()}
+                                                    className="p-1.5 rounded-lg hover:bg-muted/50 transition-colors text-muted-foreground hover:text-primary"
+                                                    title="הדפס ביאור"
+                                                  >
+                                                    <Printer className="w-4 h-4" />
+                                                  </button>
+                                                  <button
+                                                    onClick={() => { setActiveGuideId(null); setActiveGuide(null); setChunks([]); }}
+                                                    className="p-1.5 rounded-lg hover:bg-muted/50 transition-colors"
+                                                  >
+                                                    <X className="w-4 h-4 text-muted-foreground" />
+                                                  </button>
+                                                </div>
                                               </div>
 
+
+
                                               {/* Chunks grouped by source */}
-                                              {[...chunksBySource.entries()].map(([sourceKey, sourceChunks]) => (
-                                                <div key={sourceKey} className="space-y-3">
-                                                  <h4 className="text-base font-bold text-primary border-b border-primary/20 pb-1">
-                                                    {SOURCE_LABELS[sourceKey] || sourceKey}
-                                                  </h4>
-                                                  {sourceChunks.map(chunk => (
-                                                    <div key={chunk.id} className="space-y-2 pb-4 border-b border-muted/30 last:border-0">
-                                                      <div className="bg-muted/30 p-3 rounded-xl text-sm font-semibold leading-relaxed">
-                                                        {chunk.rawText}
+                                              {[...chunksBySource.entries()]
+                                                .sort(([keyA], [keyB]) => {
+                                                  const order = ['tur', 'beit_yosef', 'shulchan_arukh', 'mishnah_berurah'];
+                                                  const a = order.indexOf(keyA);
+                                                  const b = order.indexOf(keyB);
+                                                  return (a === -1 ? 99 : a) - (b === -1 ? 99 : b);
+                                                })
+                                                .map(([sourceKey, sourceChunks]) => {
+                                                  const theme = SOURCE_THEME[sourceKey] || SOURCE_THEME.shulchan_arukh;
+                                                  return (
+                                                    <div key={sourceKey} className="space-y-6 print:hidden">
+                                                      <h2 className={`text-2xl font-bold border-b pb-2 ${theme.headerClass}`}>
+                                                        {SOURCE_LABELS[sourceKey] || sourceKey}
+                                                      </h2>
+                                                      <div className="space-y-8">
+                                                        {sourceChunks.map(chunk => (
+                                                          <div key={chunk.id} className="space-y-2 pb-6 border-b last:border-0 border-muted">
+                                                            <p className={`text-lg p-4 rounded-xl font-semibold ${theme.sourceCardClass}`}>
+                                                              {chunk.rawText}
+                                                            </p>
+                                                            <p className="text-lg text-black px-2 whitespace-pre-wrap">
+                                                              {chunk.explanationText.split('**').map((text, i) =>
+                                                                i % 2 === 1 ? <strong key={i} className={`${theme.accentClass} font-bold`}>{text}</strong> : text
+                                                              )}
+                                                            </p>
+                                                          </div>
+                                                        ))}
                                                       </div>
-                                                      <div className="text-sm leading-relaxed px-1 whitespace-pre-wrap">
-                                                        {chunk.explanationText.split('**').map((text, i) =>
-                                                          i % 2 === 1
-                                                            ? <strong key={i} className="text-primary">{text}</strong>
-                                                            : text
+                                                    </div>
+                                                  );
+                                                })}
+
+                                              {/* Summary section */}
+                                              {activeGuide?.summaryText && (() => {
+                                                type SummarySection = {
+                                                  title: string;
+                                                  paragraphs: string[];
+                                                  items: string[];
+                                                };
+
+                                                const summarySections = activeGuide.summaryText
+                                                  .split('\n')
+                                                  .map((line) => line.trim())
+                                                  .filter(Boolean)
+                                                  .reduce<SummarySection[]>((sections, line) => {
+                                                    const headerMatch = line.match(/^##\s+(.+)$/);
+                                                    const bulletMatch = line.match(/^(?:[-*]|\d+\.|\u2022)\s+(.+)$/);
+
+                                                    if (headerMatch) {
+                                                      sections.push({
+                                                        title: headerMatch[1]!.trim(),
+                                                        paragraphs: [],
+                                                        items: [],
+                                                      });
+                                                      return sections;
+                                                    }
+
+                                                    if (sections.length === 0) {
+                                                      sections.push({
+                                                        title: 'סיכום למבחן רבנות',
+                                                        paragraphs: [],
+                                                        items: [],
+                                                      });
+                                                    }
+
+                                                    const current = sections[sections.length - 1]!;
+                                                    if (bulletMatch) {
+                                                      current.items.push(bulletMatch[1]!.trim());
+                                                    } else {
+                                                      current.paragraphs.push(line);
+                                                    }
+
+                                                    return sections;
+                                                  }, []);
+
+                                                return (
+                                                  <div className="pt-8 border-t-2 border-primary/30">
+                                                    <div className="bg-gradient-to-br from-primary/5 via-primary/10 to-primary/5 rounded-2xl p-8 space-y-6 border border-primary/20">
+                                                      <div className="flex items-center gap-3 pb-4 border-b border-primary/20">
+                                                        <div className="w-10 h-10 bg-primary rounded-xl flex items-center justify-center text-white font-bold text-lg">📋</div>
+                                                        <h2 className="text-2xl font-bold text-primary">סיכום למבחן רבנות</h2>
+                                                      </div>
+                                                      <div className="space-y-4 text-lg leading-relaxed">
+                                                        {summarySections.length === 0 ? (
+                                                          <p className="text-black">לא נמצאו פסקאות לסיכום.</p>
+                                                        ) : (
+                                                          summarySections.map((section, sectionIndex) => (
+                                                            <div
+                                                              key={`${section.title}-${sectionIndex}`}
+                                                              className="rounded-xl border border-primary/20 bg-white/70 p-5 space-y-3"
+                                                            >
+                                                              <h3 className="text-xl font-bold text-primary border-b border-primary/20 pb-2">
+                                                                {section.title}
+                                                              </h3>
+
+                                                              {section.paragraphs.map((paragraph, paragraphIndex) => (
+                                                                <p key={`p-${paragraphIndex}`} className="text-black leading-relaxed">
+                                                                  {paragraph.split('**').map((text, i) =>
+                                                                    i % 2 === 1 ? <strong key={i} className="text-primary font-bold">{text}</strong> : text
+                                                                  )}
+                                                                </p>
+                                                              ))}
+
+                                                              {section.items.length > 0 && (
+                                                                <ul className="space-y-2">
+                                                                  {section.items.map((item, itemIndex) => (
+                                                                    <li key={`i-${itemIndex}`} className="flex gap-3 pr-2">
+                                                                      <span className="text-primary font-bold mt-0.5 shrink-0">•</span>
+                                                                      <p className="text-black">
+                                                                        {item.split('**').map((text, i) =>
+                                                                          i % 2 === 1 ? <strong key={i} className="text-primary font-bold">{text}</strong> : text
+                                                                        )}
+                                                                      </p>
+                                                                    </li>
+                                                                  ))}
+                                                                </ul>
+                                                              )}
+                                                            </div>
+                                                          ))
                                                         )}
                                                       </div>
                                                     </div>
-                                                  ))}
-                                                </div>
-                                              ))}
-
-                                              {/* Summary section */}
-                                              {activeGuide?.summaryText && (
-                                                <div className="bg-gradient-to-br from-primary/5 via-primary/10 to-primary/5 rounded-2xl p-6 space-y-3 border border-primary/20">
-                                                  <h4 className="text-base font-bold text-primary flex items-center gap-2">
-                                                    📋 סיכום
-                                                  </h4>
-                                                  <div className="text-sm leading-relaxed whitespace-pre-wrap">
-                                                    {activeGuide.summaryText.split('**').map((text, i) =>
-                                                      i % 2 === 1
-                                                        ? <strong key={i} className="text-primary">{text}</strong>
-                                                        : text
-                                                    )}
                                                   </div>
-                                                </div>
-                                              )}
+                                                );
+                                              })()}
                                             </div>
                                           )}
                                         </div>

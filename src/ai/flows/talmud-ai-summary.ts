@@ -39,56 +39,39 @@ function validateSummary(text: string): { valid: boolean; errors: string[] } {
     errors.push('אחוז העברית בסיכום נמוך מדי.');
   }
 
-  const bulletRegex = /^\s*(?:[-*•]|\d+\.)\s+/m;
+  const bulletRegex = /^\s*(?:[-*]|\u2022|\d+\.)\s+/m;
   if (!bulletRegex.test(text)) {
     errors.push('הסיכום חייב להיות בפורמט נקודות.');
+  }
+  if (!/\(מקור ההלכה:\s*[^)]+\)/u.test(text) && !/\([^)]+\)/u.test(text)) {
+    // We check for some sort of source format at the end of the text.
+    // The new prompt uses (לדוגמה: "... (רמב"ם)") so we check for parentheses.
+    errors.push('חסר פורמט "(שם הפוסק/המקור)" בסוף ההלכה כנדרש בסיכום.');
+  }
+
+  if (/הכרעה למעשה/u.test(text)) {
+    errors.push('אין לכלול את הביטוי "הכרעה למעשה" בסיכום.');
   }
 
   return { valid: errors.length === 0, errors };
 }
 
 function buildSummaryPrompt(studyGuideText: string, sources: string[]) {
-  const hasTur = sources.includes('tur');
-  const hasBeitYosef = sources.includes('beit_yosef');
-  const hasSA = sources.includes('shulchan_arukh');
-  const hasMB = sources.includes('mishnah_berurah');
-
-  let structureInstruction = '';
-
-  if (hasSA && (hasTur || hasBeitYosef)) {
-    structureInstruction += `\n## דעות ומקורות\nציין את הדעות השונות שהובאו (רמב"ם, רא"ש, רי"ף וכו'), עם ציון המקור (טור / בית יוסף).\n`;
-    structureInstruction += `\n## פסיקת השולחן ערוך\nציין בקצרה באיזו שיטה פסק השולחן ערוך ומהי ההלכה שנפסקה.\n`;
-  }
-
-  if (hasMB) {
-    structureInstruction += `\n## חידושי המשנה ברורה\nציין בנקודות את חידושיו, הערותיו המעשיות וכל הלכה נוספת שמביא.\n`;
-  }
-
-  return `אתה מומחה הלכה שמכין סיכום עבור תלמיד למבחן רבנות.
+  return `אתה מומחה הלכה שמכין סיכום ממוקד עבור תלמיד למבחן רבנות.
 ענה בעברית בלבד.
 
-כללים מחייבים:
-- !!! חוק עליון !!! אסור בהחלט לכתוב שום משפט פתיחה, הקדמה, סיום, או הערת מטא. 
-- רשימת ביטויים אסורים (גם לא בווריאציה): "בטח", "הנה", "סיכום מתוקן", "מנוסח מחדש", "בעברית תקינה", "בפורמט", "בהצלחה", "הנה הסיכום", "להלן", "כפי שביקשת".
-- המילה הראשונה בתשובתך חייבת להיות חלק מהתוכן ההלכתי עצמו (דין, מקור, או כותרת).
-- כתוב סיכום ברור, ממוקד, ותמציתי.
-- כל נקודה צריכה להכיל: **הדין**, **המקור** (מי אמר), ו**ההכרעה למעשה**.
-- אם יש מחלוקת: ציין את השיטות בקצרה, ואת מי פוסקים הלכה.
-- הדגש מושגים חשובים ב-**bold**.
-- אל תחזור על דברים שכבר כתובים.
+כללים מחייבים לסיכום:
+1. **חלוקה לנושאים:** ייתכן שהטקסט עוסק במספר נושאים. ציין כל נושא בנפרד והסבר בקצרה במה מדובר.
+2. **ריבוי דעות (מחלוקת):** אם יש מחלוקת בנושא, פרט בקצרה את הדעות השונות (מי אומר מה), ובסוף ציין בבירור מהי ההלכה למעשה.
+3. **דעה יחידה (ללא מחלוקת):** אם בנושא מסוים יש רק דעה אחת, פוסק אחד, או שאין מחלוקת כלל – פשוט כתוב את הדין/ההלכה באופן ישיר, וציין את שם הפוסק או המקור בסוגריים בלבד בסוף המשפט (לדוגמה: "... (רמב"ם)").
+4. **מבנה והדגשות:** ערוך את הסיכום ברשימת נקודות (bullets). הדגש ב-**bold** את שמות הפוסקים ומילות מפתח/מקור חשובות.
+5. **חוק עליון - ללא תוספות:** אסור לכתוב פתיח, סיום או הערות מטא (כגון "הנה הסיכום", "להלן הנושאים"). התחל את התשובה ישירות עם הנושא הראשון.
 
-## הלכות עיקריות
-ציין כל הלכה כנקודה נפרדת עם הדין המעשי.
-${structureInstruction}
-## סיכום למעשה
-שורה אחת עד שתיים: מה ההלכה למעשה בפועל.
-
-טקסט מלא:
+טקסט מלא לעיבוד:
 ${studyGuideText}
 
 סיכום:`;
 }
-
 /**
  * Strip any AI meta-commentary preamble from the beginning of the summary.
  * We remove lines that start with known meta-phrases until we hit real content.
@@ -123,6 +106,42 @@ function stripMetaPrefix(text: string): string {
   return lines.slice(startIdx).join('\n').trim();
 }
 
+function normalizeSummaryFormat(text: string): string {
+  const lines = text
+    .split('\n')
+    .map(line => line.trim())
+    .filter(Boolean)
+    .filter(line => !/^\s*##\s*הכרעה למעשה\b/u.test(line))
+    .filter(line => !/^\s*הכרעה למעשה\s*:?\s*$/u.test(line));
+
+  const output: string[] = [];
+
+  for (const line of lines) {
+    // If it's a heading for a topic, just push it
+    if (/^#/.test(line)) {
+      output.push('');
+      output.push(line);
+      continue;
+    }
+
+    // Try to ensure some sort of source attribution if it looks like a bullet
+    const bulletRegex = /^(?:[-*]|\u2022|\d+\.)\s+(.+)$/u;
+    const bulletMatch = line.match(bulletRegex);
+
+    if (bulletMatch) {
+      let body = line.trim();
+      if (!/\([^)]+\)/u.test(body)) {
+        body = `${body} (מקור לא צוין)`;
+      }
+      output.push(body);
+    } else {
+      output.push(line);
+    }
+  }
+
+  return output.join('\n').trim();
+}
+
 export async function summarizeTalmudStudyGuide(input: TalmudAISummaryInput): Promise<TalmudAISummaryOutput> {
   return talmudAISummaryFlow(input);
 }
@@ -144,13 +163,18 @@ export const talmudAISummaryFlow = ai.defineFlow(
       timeoutMs: 120_000,
     });
 
-    let summary = stripMetaPrefix(generated.text);
+    let summary = normalizeSummaryFormat(stripMetaPrefix(generated.text));
     let modelUsed = generated.modelUsed;
     let validation = validateSummary(summary);
 
     if (!validation.valid) {
       const repairPrompt = `הסיכום הבא לא תקין: ${validation.errors.join(', ')}.
-תקן בעברית בלבד ובפורמט נקודות. תתחיל ישר עם התוכן ההלכתי – בלי פתיח.
+תקן בעברית בלבד ובפורמט נקודות, תוך שמירה על הכללים הבאים:
+1. **חלוקה לנושאים:** ייתכן שהטקסט עוסק במספר נושאים. ציין כל נושא בנפרד והסבר בקצרה במה מדובר.
+2. **ריבוי דעות (מחלוקת):** אם יש מחלוקת בנושא, פרט בקצרה את הדעות השונות (מי אומר מה), ובסוף ציין בבירור מהי ההלכה למעשה.
+3. **דעה יחידה (ללא מחלוקת):** אם בנושא מסוים יש רק דעה אחת, פוסק אחד, או שאין מחלוקת כלל – פשוט כתוב את הדין/ההלכה באופן ישיר, וציין את שם הפוסק או המקור בסוגריים בלבד בסוף המשפט (לדוגמה: "... (רמב"ם)").
+4. **מבנה והדגשות:** ערוך את הסיכום ברשימת נקודות (bullets). הדגש ב-**bold** את שמות הפוסקים ומילות מפתח/מקור חשובות.
+5. **חוק עליון - ללא תוספות:** אסור לכתוב פתיח, סיום או הערות מטא. התחל את התשובה ישירות עם הנושא הראשון.
 
 סיכום לא תקין:
 ${summary}
@@ -164,7 +188,7 @@ ${summary}
         timeoutMs: 45_000,
       });
 
-      summary = stripMetaPrefix(repaired.text);
+      summary = normalizeSummaryFormat(stripMetaPrefix(repaired.text));
       modelUsed = repaired.modelUsed;
       validation = validateSummary(summary);
     }
@@ -177,3 +201,4 @@ ${summary}
     };
   }
 );
+

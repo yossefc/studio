@@ -1,0 +1,18 @@
+
+=== SEIF 1 ===
+Resulting CUT: 0 to 1501
+
+=== SEIF 2 ===
+Resulting CUT: 0 to 1501
+
+=== SEIF 3 ===
+Resulting CUT: 0 to 1501
+
+=== SEIF 4 ===
+Resulting CUT: 0 to 1501
+
+=== SEIF 5 ===
+Resulting CUT: 0 to 1501
+
+=== SEIF 6 ===
+Resulting CUT: 0 to 1501

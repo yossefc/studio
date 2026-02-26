@@ -50,7 +50,11 @@ function getSourcePalette(sourceKey?: SourceResult['sourceKey']) {
   return SOURCE_PALETTE[sourceKey] || { accent: COLOR_PRIMARY, softBg: COLOR_SOURCE_BG };
 }
 
-function extractBoldRanges(text: string, startIndex: number): { cleanText: string; ranges: StyledRange[] } {
+function extractBoldRanges(
+  text: string,
+  startIndex: number,
+  sourceKey?: SourceResult['sourceKey'],
+): { cleanText: string; ranges: StyledRange[] } {
   let i = 0;
   let cleanText = '';
   const ranges: StyledRange[] = [];
@@ -78,6 +82,7 @@ function extractBoldRanges(text: string, startIndex: number): { cleanText: strin
         start: startIndex + boldStart,
         end: startIndex + boldEnd,
         style: 'bold',
+        sourceKey,
       });
     }
 
@@ -101,6 +106,41 @@ function normalizeForDoc(text: string, collapseLineBreaks = false): string {
   }
 
   return normalized.replace(/\s*\n+\s*/g, ' ').replace(/\s{2,}/g, ' ').trim();
+}
+
+function structureSummaryForDoc(summary: string): string {
+  const lines = normalizeForDoc(summary)
+    .split('\n')
+    .map(line => line.trim())
+    .filter(Boolean);
+
+  if (lines.length === 0) {
+    return '';
+  }
+
+  const structured: string[] = [];
+
+  for (const line of lines) {
+    const headerMatch = line.match(/^##\s+(.+)$/);
+    if (headerMatch) {
+      if (structured.length > 0 && structured[structured.length - 1] !== '') {
+        structured.push('');
+      }
+      structured.push(headerMatch[1]!.trim());
+      structured.push('');
+      continue;
+    }
+
+    const bulletMatch = line.match(/^(?:[-*]|\d+\.|\u2022)\s+(.+)$/);
+    if (bulletMatch) {
+      structured.push(`• ${bulletMatch[1]!.trim()}`);
+      continue;
+    }
+
+    structured.push(line);
+  }
+
+  return structured.join('\n').replace(/\n{3,}/g, '\n\n').trim();
 }
 
 /**
@@ -161,8 +201,8 @@ export async function createStudyGuideDoc(
     styledRanges.push({ start, end: cursor, style, sourceKey });
   };
 
-  const appendBoldAware = (text: string) => {
-    const { cleanText, ranges } = extractBoldRanges(text, cursor);
+  const appendBoldAware = (text: string, sourceKey?: SourceResult['sourceKey']) => {
+    const { cleanText, ranges } = extractBoldRanges(text, cursor, sourceKey);
     fullContent += cleanText;
     cursor += cleanText.length;
     styledRanges.push(...ranges);
@@ -194,7 +234,7 @@ export async function createStudyGuideDoc(
       sourceParagraphs.push({ start: sourceStart, end: cursor, sourceKey: sr.sourceKey });
 
       // Explanation
-      appendBoldAware(`${compactExplanation}\n`);
+      appendBoldAware(`${compactExplanation}\n`, sr.sourceKey);
 
       if (chunkIndex < sr.chunks.length - 1) {
         appendPlain('\n');
@@ -211,7 +251,7 @@ export async function createStudyGuideDoc(
   appendStyled('סיכום הלכה למעשה\n', 'summaryHeader');
   appendStyled('--------------------\n', 'separator');
 
-  const compactSummary = normalizeForDoc(summary);
+  const compactSummary = structureSummaryForDoc(summary);
   if (compactSummary) {
     const summaryStart = cursor;
     appendBoldAware(`${compactSummary}\n`);
@@ -378,17 +418,20 @@ export async function createStudyGuideDoc(
         break;
       }
 
-      case 'bold':
+      case 'bold': {
+        const boldPalette = getSourcePalette(range.sourceKey);
         requests.push({
           updateTextStyle: {
             range: { startIndex: range.start, endIndex: range.end },
             textStyle: {
               bold: true,
+              foregroundColor: { color: { rgbColor: boldPalette.accent } },
             },
-            fields: 'bold',
+            fields: 'bold,foregroundColor',
           },
         });
         break;
+      }
     }
   }
 

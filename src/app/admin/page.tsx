@@ -105,7 +105,7 @@ export default function AdminGuidesPage() {
         , 0) || 0;
 
     return (
-        <div className="min-h-screen bg-background pb-32">
+        <div className="min-h-screen bg-background pb-32 select-none">
             <Navigation />
             <main className="pt-24 px-6 max-w-4xl mx-auto w-full">
                 <header className="mb-8">

@@ -1,20 +1,24 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { Navigation } from '@/components/Navigation';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Loader2, CheckCircle2, AlertCircle, ArrowRight, Book, XCircle } from 'lucide-react';
+import { Loader2, CheckCircle2, AlertCircle, ArrowRight, Book, XCircle, Minus, FileText, Info, Bookmark, Copyright } from 'lucide-react';
+import { cn } from '@/lib/utils';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
+import { TehilimReader } from '@/components/TehilimReader';
 import { generateMultiSourceStudyGuide, exportToGoogleDocs, type GenerationResult, type SourceResult } from '@/app/actions/study-guide';
 import { getSimanOptions, getSeifOptions, type SimanOption, type SeifOption } from '@/app/actions/sefaria-metadata';
 import type { SourceKey } from '@/lib/sefaria-api';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useFirestore, useUser, useAuth } from '@/firebase';
-import { doc, setDoc, updateDoc } from 'firebase/firestore';
+import { doc, setDoc, updateDoc, onSnapshot } from 'firebase/firestore';
 
 interface StudyGuideEntity {
   id: string;
@@ -46,22 +50,46 @@ const SOURCE_OPTIONS: { key: SourceKey; label: string; onlyOC: boolean }[] = [
   { key: 'mishnah_berurah', label: 'משנה ברורה', onlyOC: true },
 ];
 
-const SOURCE_THEME: Record<SourceKey, { headerClass: string; sourceCardClass: string }> = {
+// Main sources (full-width top) use bordeaux title. Commentaries (bottom) use colored badges.
+const SOURCE_THEME: Record<SourceKey, {
+  titleColor: string;        // Title text color
+  badgeBg: string;           // Badge background (commentaries only)
+  badgeText: string;         // Badge text color
+  accentClass: string;       // Bold accent in explanations
+  borderAccent: string;      // Right-border color for explanations
+  isMainSource: boolean;     // true = full-width top section
+}> = {
   tur: {
-    headerClass: 'text-amber-700 border-amber-300',
-    sourceCardClass: 'bg-amber-50 border border-amber-200 text-amber-900',
-  },
-  beit_yosef: {
-    headerClass: 'text-teal-700 border-teal-300',
-    sourceCardClass: 'bg-teal-50 border border-teal-200 text-teal-900',
+    titleColor: 'text-[#722F37]',
+    badgeBg: '',
+    badgeText: '',
+    accentClass: 'text-[#722F37]',
+    borderAccent: 'border-r-[#722F37]',
+    isMainSource: true,
   },
   shulchan_arukh: {
-    headerClass: 'text-blue-700 border-blue-300',
-    sourceCardClass: 'bg-blue-50 border border-blue-200 text-blue-900',
+    titleColor: 'text-[#722F37]',
+    badgeBg: '',
+    badgeText: '',
+    accentClass: 'text-[#722F37]',
+    borderAccent: 'border-r-[#722F37]',
+    isMainSource: true,
+  },
+  beit_yosef: {
+    titleColor: 'text-white',
+    badgeBg: 'bg-[#008080]',
+    badgeText: 'text-white',
+    accentClass: 'text-[#008080]',
+    borderAccent: 'border-r-[#008080]',
+    isMainSource: false,
   },
   mishnah_berurah: {
-    headerClass: 'text-emerald-700 border-emerald-300',
-    sourceCardClass: 'bg-emerald-50 border border-emerald-200 text-emerald-900',
+    titleColor: 'text-black',
+    badgeBg: 'bg-[#84CC16]',
+    badgeText: 'text-black',
+    accentClass: 'text-[#166534]',
+    borderAccent: 'border-r-[#84CC16]',
+    isMainSource: false,
   },
 };
 
@@ -82,10 +110,58 @@ export default function GeneratePage() {
   const [currentGuideId, setCurrentGuideId] = useState<string | null>(null);
   const [guide, setGuide] = useState<StudyGuideEntity | null>(null);
 
+  // Progress tracking
+  const [progressDone, setProgressDone] = useState(0);
+  const [progressTotal, setProgressTotal] = useState(0);
+  const [progressPhase, setProgressPhase] = useState<string>('chunks');
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
   // Local state for preview
   const [previewSourceResults, setPreviewSourceResults] = useState<SourceResult[]>([]);
   const [previewSummary, setPreviewSummary] = useState('');
   const publishedDocUrl = guide?.googleDocUrl?.trim() ?? '';
+
+  type SummarySection = {
+    title: string;
+    paragraphs: string[];
+    items: string[];
+  };
+
+  const summarySections = previewSummary
+    .split('\n')
+    .map(line => line.trim())
+    .filter(Boolean)
+    .reduce<SummarySection[]>((sections, line) => {
+      const headerMatch = line.match(/^##\s+(.+)$/);
+      const bulletMatch = line.match(/^(?:[-*]|\d+\.|\u2022)\s+(.+)$/);
+
+      if (headerMatch) {
+        sections.push({
+          title: headerMatch[1]!.trim(),
+          paragraphs: [],
+          items: [],
+        });
+        return sections;
+      }
+
+      if (sections.length === 0) {
+        sections.push({
+          title: 'Summary',
+          paragraphs: [],
+          items: [],
+        });
+      }
+
+      const current = sections[sections.length - 1]!;
+      if (bulletMatch) {
+        current.items.push(bulletMatch[1]!.trim());
+      } else {
+        current.paragraphs.push(line);
+      }
+
+      return sections;
+    }, []);
 
   const { user, isUserLoading } = useUser();
   const auth = useAuth();
@@ -98,6 +174,31 @@ export default function GeneratePage() {
       router.push('/login');
     }
   }, [user, isUserLoading, router]);
+
+  // Listen for real-time progress updates from the server
+  useEffect(() => {
+    if (status !== 'processing' || !currentGuideId || !user || !firestore) return;
+    const guideDocRef = doc(firestore, 'users', user.uid, 'studyGuides', currentGuideId);
+    const unsub = onSnapshot(guideDocRef, (snap) => {
+      const data = snap.data();
+      if (!data) return;
+      if (typeof data.progressDone === 'number') setProgressDone(data.progressDone);
+      if (typeof data.progressTotal === 'number') setProgressTotal(data.progressTotal);
+      if (typeof data.progressPhase === 'string') setProgressPhase(data.progressPhase);
+    });
+    return () => unsub();
+  }, [status, currentGuideId, user, firestore]);
+
+  // Elapsed time counter
+  useEffect(() => {
+    if (status === 'processing') {
+      setElapsedSeconds(0);
+      timerRef.current = setInterval(() => setElapsedSeconds(s => s + 1), 1000);
+    } else {
+      if (timerRef.current) clearInterval(timerRef.current);
+    }
+    return () => { if (timerRef.current) clearInterval(timerRef.current); };
+  }, [status]);
 
   // Remove MB from selection when switching away from Orach Chayim
   useEffect(() => {
@@ -315,7 +416,7 @@ export default function GeneratePage() {
   return (
     <div className="min-h-screen bg-background pb-32">
       <Navigation />
-      <main className="pt-24 px-6 max-w-2xl mx-auto w-full">
+      <main className={cn("pt-24 px-6 mx-auto w-full", status === 'preview' ? 'max-w-[90rem]' : 'max-w-2xl')}>
         {(status === 'idle' || status === 'error') && (
           <Card className="shadow-2xl border-none rounded-[2.5rem] overflow-hidden bg-white">
             <CardHeader className="bg-primary text-primary-foreground p-10 text-center">
@@ -432,120 +533,354 @@ export default function GeneratePage() {
           </Card>
         )}
 
-        {(status === 'processing' || status === 'exporting') && (
-          <div className="flex flex-col items-center justify-center space-y-10 py-20 text-center">
-            <div className="relative">
-              <div className="absolute inset-0 bg-primary/10 rounded-full blur-3xl animate-pulse" />
-              <Loader2 className="w-24 h-24 text-primary animate-spin relative" />
-            </div>
-            <div className="space-y-4 max-w-sm">
-              <h2 className="text-3xl font-bold font-headline">
-                {status === 'processing' ? 'מכין את הביאור...' : 'מייצא ל-Google Docs...'}
-              </h2>
-              <p className="text-muted-foreground text-lg">
-                {status === 'processing'
-                  ? 'אנחנו מנתחים את הטקסט מכל המקורות, ומכינים את הביאור עבורך.'
-                  : 'יוצר מסמך חדש ב-Google Docs ומעצב את הטקסט...'}
-              </p>
-            </div>
-            {status === 'processing' && (
-              <Button variant="outline" onClick={handleCancel} className="rounded-xl border-destructive text-destructive hover:bg-destructive/10 gap-2">
-                <XCircle className="w-4 h-4" /> ביטול הפעולה
-              </Button>
-            )}
-          </div>
-        )}
+        {(status === 'processing' || status === 'exporting') && (() => {
+          const pct = progressTotal > 0 ? Math.round((progressDone / progressTotal) * 100) : 0;
+          const isSummaryPhase = progressPhase === 'summary';
 
-        {status === 'preview' && (
-          <div className="space-y-8 animate-in fade-in py-8">
-            <div className="text-center space-y-4">
-              <h1 className="text-4xl font-headline text-primary">תצוגה מקדימה</h1>
-              <p className="text-muted-foreground text-xl">
-                הביאור עבור <strong>{guide?.tref}</strong> נוצר בהצלחה. תוכל לעבור עליו לפני הייצוא ל-Google Docs.
-              </p>
-            </div>
+          // Estimate remaining seconds based on average rate
+          let remainingSeconds = 0;
+          if (isSummaryPhase) {
+            remainingSeconds = Math.max(15 - (elapsedSeconds % 15), 0); // ~15s for summary
+          } else if (progressDone > 0 && progressTotal > 0) {
+            const avgSecondsPerChunk = elapsedSeconds / progressDone;
+            const chunksLeft = progressTotal - progressDone;
+            const summaryEstimate = 15;
+            remainingSeconds = Math.ceil(chunksLeft * avgSecondsPerChunk + summaryEstimate);
+          } else if (progressTotal > 0) {
+            // No chunks done yet, rough estimate: ~12s per chunk + 15s summary
+            remainingSeconds = progressTotal * 12 + 15;
+          }
 
-            <Card className="p-8 space-y-8 bg-card shadow-lg rounded-[2rem]">
-              {/* Per-source sections */}
-              {previewSourceResults.map((sr) => {
-                const theme = SOURCE_THEME[sr.sourceKey] || SOURCE_THEME.shulchan_arukh;
-                return (
-                  <div key={sr.sourceKey} className="space-y-6">
-                    <h2 className={`text-2xl font-bold border-b pb-2 ${theme.headerClass}`}>
-                      {sr.hebrewLabel}
-                    </h2>
-                    <div className="space-y-8">
-                      {sr.chunks.map((chunk, index) => (
-                        <div key={index} className="space-y-2 pb-6 border-b last:border-0 border-muted">
-                          <p className={`text-lg p-4 rounded-xl font-semibold ${theme.sourceCardClass}`}>
-                            {chunk.rawText}
-                          </p>
-                          <p className="text-lg text-black px-2 whitespace-pre-wrap">
-                            {chunk.explanation.split('**').map((text, i) =>
-                              i % 2 === 1 ? <strong key={i} className="text-black font-bold">{text}</strong> : text
-                            )}
-                          </p>
-                        </div>
-                      ))}
+          const etaMins = Math.floor(remainingSeconds / 60);
+          const etaSecs = remainingSeconds % 60;
+          const etaStr = `${String(etaMins).padStart(2, '0')}:${String(etaSecs).padStart(2, '0')}`;
+
+          return (
+            <div className="flex flex-col items-center space-y-4 py-6 text-center">
+              {/* Title + cancel row */}
+              <div className="flex items-center gap-4">
+                <h2 className="text-2xl font-bold font-headline">
+                  {status === 'exporting' ? 'מייצא ל-Google Docs...' : isSummaryPhase ? 'מכין סיכום...' : 'מכין את הביאור...'}
+                </h2>
+                {status === 'processing' && (
+                  <Button variant="outline" size="sm" onClick={handleCancel} className="rounded-xl border-destructive text-destructive hover:bg-destructive/10 gap-1 text-xs h-8">
+                    <XCircle className="w-3.5 h-3.5" /> ביטול
+                  </Button>
+                )}
+              </div>
+
+              {status === 'processing' && (
+                <div className="space-y-2 w-full max-w-md">
+                  {/* Progress bar */}
+                  <div className="w-full bg-muted rounded-full h-3 overflow-hidden shadow-inner">
+                    <div
+                      className="h-full bg-gradient-to-l from-primary to-primary/70 rounded-full transition-all duration-500 ease-out"
+                      style={{ width: isSummaryPhase ? '100%' : `${pct}%` }}
+                    />
+                  </div>
+
+                  {/* Progress details */}
+                  <div className="flex items-center justify-between text-xs text-muted-foreground px-1">
+                    <span>
+                      {isSummaryPhase
+                        ? '📋 מסכם את כל המקורות...'
+                        : progressTotal > 0
+                          ? `${progressDone} / ${progressTotal} קטעים עובדו`
+                          : 'מתחיל עיבוד...'}
+                    </span>
+                  </div>
+                </div>
+              )}
+
+              {status === 'exporting' && (
+                <>
+                  <Loader2 className="w-10 h-10 text-primary animate-spin" />
+                  <p className="text-muted-foreground text-sm">
+                    יוצר מסמך חדש ב-Google Docs ומעצב את הטקסט...
+                  </p>
+                </>
+              )}
+
+              {/* Tehilim reader while waiting */}
+              {status === 'processing' && <TehilimReader />}
+            </div>
+          );
+        })()}
+
+        {status === 'preview' && (() => {
+          // Separate main sources (top, full-width) from commentaries (bottom, side-by-side)
+          const mainSources = ['tur', 'shulchan_arukh']
+            .map(key => previewSourceResults.find(sr => sr.sourceKey === key))
+            .filter(Boolean) as SourceResult[];
+          const commentarySources = ['mishnah_berurah', 'beit_yosef']
+            .map(key => previewSourceResults.find(sr => sr.sourceKey === key))
+            .filter(Boolean) as SourceResult[];
+
+          // Toolbar icons row (alhatorah-style)
+          const Toolbar = () => (
+            <div className="flex items-center gap-1.5 px-3 py-1.5">
+              <button className="text-gray-400 hover:text-gray-600"><Minus className="w-3.5 h-3.5" /></button>
+              <button className="text-gray-400 hover:text-gray-600"><FileText className="w-3.5 h-3.5" /></button>
+              <button className="text-gray-400 hover:text-gray-600"><Info className="w-3.5 h-3.5" /></button>
+              <button className="text-gray-400 hover:text-gray-600"><Copyright className="w-3.5 h-3.5" /></button>
+              <button className="text-gray-400 hover:text-gray-600"><Bookmark className="w-3.5 h-3.5" /></button>
+            </div>
+          );
+
+          // Render a main source block (Tur / Shulchan Arukh) - full width, bordeaux title
+          const renderMainSource = (sr: SourceResult) => {
+            const theme = SOURCE_THEME[sr.sourceKey] || SOURCE_THEME.shulchan_arukh;
+            return (
+              <div key={sr.sourceKey} className="bg-white">
+                {/* Toolbar + Title */}
+                <div className="flex items-center justify-between border-b border-gray-100">
+                  <Toolbar />
+                  <h2 className={cn('text-xl font-bold font-sefer pl-4', theme.titleColor)}>
+                    {sr.hebrewLabel}
+                  </h2>
+                </div>
+                {/* Content */}
+                <div className="px-6 py-4 text-right" dir="rtl">
+                  {sr.chunks.map((chunk, index) => (
+                    <div key={chunk.id || index} className={index > 0 ? 'mt-4 pt-4 border-t border-gray-50' : ''}>
+                      <p className="font-sefer text-[1.08rem] leading-[1.7] text-[#333]">
+                        {chunk.rawText}
+                      </p>
+                      <div className={cn(
+                        'mt-2 border-r-[3px] pr-3 text-[0.95rem] leading-[1.6] text-[#555] whitespace-pre-wrap',
+                        theme.borderAccent
+                      )}>
+                        {chunk.explanation.split('**').map((text, i) =>
+                          i % 2 === 1
+                            ? <strong key={i} className={cn('font-bold', theme.accentClass)}>{text}</strong>
+                            : text
+                        )}
+                      </div>
                     </div>
-                  </div>
-                );
-              })}
+                  ))}
+                </div>
+              </div>
+            );
+          };
 
-              {/* Summary - styled as a study card */}
-              <div className="pt-8 border-t-2 border-primary/30">
-                <div className="bg-gradient-to-br from-primary/5 via-primary/10 to-primary/5 rounded-2xl p-8 space-y-6 border border-primary/20">
-                  <div className="flex items-center gap-3 pb-4 border-b border-primary/20">
-                    <div className="w-10 h-10 bg-primary rounded-xl flex items-center justify-center text-white font-bold text-lg">📋</div>
-                    <h2 className="text-2xl font-bold text-primary">סיכום למבחן רבנות</h2>
-                  </div>
-                  <div className="space-y-4 text-lg leading-relaxed">
-                    {previewSummary.split('\n').filter(line => line.trim()).map((line, idx) => {
-                      const trimmed = line.trim();
-                      // Detect markdown headers (## ...)
-                      if (trimmed.startsWith('## ')) {
-                        return (
-                          <h3 key={idx} className="text-xl font-bold text-primary mt-6 mb-2 border-b border-primary/20 pb-1">
-                            {trimmed.replace('## ', '')}
-                          </h3>
-                        );
-                      }
-                      // Detect bullet points
-                      const isBullet = /^[-*•]\s+/.test(trimmed) || /^\d+\.\s+/.test(trimmed);
-                      const cleanLine = trimmed.replace(/^[-*•]\s+/, '').replace(/^\d+\.\s+/, '');
-                      return (
-                        <div key={idx} className={`flex gap-3 ${isBullet ? 'pr-2' : ''}`}>
-                          {isBullet && <span className="text-primary font-bold mt-0.5 shrink-0">●</span>}
-                          <p className={`${isBullet ? '' : 'font-semibold text-primary'}`}>
-                            {(isBullet ? cleanLine : trimmed).split('**').map((text, i) =>
-                              i % 2 === 1 ? <strong key={i} className="text-primary font-bold">{text}</strong> : text
-                            )}
-                          </p>
+          // Render a commentary block (Beit Yosef / Mishnah Berurah) - badge title, scrollable
+          const renderCommentary = (sr: SourceResult) => {
+            const theme = SOURCE_THEME[sr.sourceKey] || SOURCE_THEME.beit_yosef;
+            return (
+              <div key={sr.sourceKey} className="bg-white flex flex-col overflow-hidden">
+                {/* Toolbar + Badge */}
+                <div className="flex items-center justify-between border-b border-gray-100 flex-shrink-0">
+                  <Toolbar />
+                  <span className={cn(
+                    'px-3 py-1 ml-3 text-sm font-bold font-sefer rounded-sm border',
+                    theme.badgeBg, theme.badgeText
+                  )}>
+                    {sr.hebrewLabel}
+                  </span>
+                </div>
+                {/* Scrollable content */}
+                <ScrollArea className="h-[45vh]">
+                  <div className="px-4 py-3 text-right" dir="rtl">
+                    {sr.chunks.map((chunk, index) => (
+                      <div key={chunk.id || index} className={index > 0 ? 'mt-3 pt-3 border-t border-gray-50' : ''}>
+                        <p className="font-sefer text-[0.95rem] leading-[1.65] text-[#333]">
+                          {chunk.rawText}
+                        </p>
+                        <div className={cn(
+                          'mt-1.5 border-r-[3px] pr-3 text-[0.88rem] leading-[1.55] text-[#555] whitespace-pre-wrap',
+                          theme.borderAccent
+                        )}>
+                          {chunk.explanation.split('**').map((text, i) =>
+                            i % 2 === 1
+                              ? <strong key={i} className={cn('font-bold', theme.accentClass)}>{text}</strong>
+                              : text
+                          )}
                         </div>
+                      </div>
+                    ))}
+                  </div>
+                </ScrollArea>
+              </div>
+            );
+          };
+
+          return (
+            <div className="animate-in fade-in py-4 space-y-4 bg-[#F5F5F5] -mx-6 px-6">
+              {/* Header bar */}
+              <div className="flex items-center justify-between bg-white px-5 py-3 border border-gray-200">
+                <div className="flex gap-2">
+                  <Button
+                    onClick={handleExport}
+                    size="sm"
+                    className="h-9 text-sm bg-[#722F37] hover:bg-[#5a252c] text-white rounded gap-2"
+                  >
+                    לייצא ל-Google Docs <ArrowRight className="w-4 h-4 rotate-180" />
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setStatus('idle')}
+                    className="h-9 text-sm rounded"
+                  >
+                    חזור
+                  </Button>
+                </div>
+                <h1 className="text-xl font-bold font-sefer text-[#722F37]">{guide?.tref}</h1>
+              </div>
+
+              {/* ====== Desktop layout ====== */}
+              <div className="hidden lg:flex flex-col gap-[1px] bg-gray-200 border border-gray-200">
+                {/* Top: main sources stacked full-width */}
+                {mainSources.map(sr => renderMainSource(sr))}
+
+                {/* Bottom: commentaries side by side */}
+                {commentarySources.length > 0 && (
+                  <div className="grid gap-[1px]" style={{
+                    gridTemplateColumns: `repeat(${commentarySources.length}, minmax(0, 1fr))`,
+                  }}>
+                    {commentarySources.map(sr => renderCommentary(sr))}
+                  </div>
+                )}
+              </div>
+
+              {/* ====== Mobile: Tabbed Interface ====== */}
+              <div className="lg:hidden">
+                <Tabs defaultValue={previewSourceResults[0]?.sourceKey} dir="rtl">
+                  <TabsList className="w-full h-auto flex-wrap gap-1 bg-white border border-gray-200 rounded-none p-1">
+                    {previewSourceResults.map((sr) => {
+                      const theme = SOURCE_THEME[sr.sourceKey] || SOURCE_THEME.shulchan_arukh;
+                      return (
+                        <TabsTrigger
+                          key={sr.sourceKey}
+                          value={sr.sourceKey}
+                          className={cn(
+                            'flex-1 min-w-[4rem] text-sm font-bold font-sefer rounded-sm py-1.5',
+                            'data-[state=active]:shadow-sm',
+                            theme.isMainSource ? 'data-[state=active]:text-[#722F37]' : ''
+                          )}
+                        >
+                          {sr.hebrewLabel}
+                        </TabsTrigger>
                       );
                     })}
-                  </div>
+                  </TabsList>
+
+                  {previewSourceResults.map((sr) => {
+                    const theme = SOURCE_THEME[sr.sourceKey] || SOURCE_THEME.shulchan_arukh;
+                    return (
+                      <TabsContent key={sr.sourceKey} value={sr.sourceKey}>
+                        <div className="bg-white border border-gray-200">
+                          <div className="flex items-center justify-between border-b border-gray-100 px-3 py-2">
+                            <Toolbar />
+                            {theme.isMainSource ? (
+                              <h2 className={cn('text-lg font-bold font-sefer', theme.titleColor)}>
+                                {sr.hebrewLabel}
+                              </h2>
+                            ) : (
+                              <span className={cn('px-3 py-1 text-sm font-bold font-sefer rounded-sm', theme.badgeBg, theme.badgeText)}>
+                                {sr.hebrewLabel}
+                              </span>
+                            )}
+                          </div>
+                          <div className="px-4 py-3 text-right" dir="rtl">
+                            {sr.chunks.map((chunk, index) => (
+                              <div key={chunk.id || index} className={index > 0 ? 'mt-3 pt-3 border-t border-gray-50' : ''}>
+                                <p className="font-sefer text-[1rem] leading-[1.65] text-[#333]">
+                                  {chunk.rawText}
+                                </p>
+                                <div className={cn(
+                                  'mt-1.5 border-r-[3px] pr-3 text-[0.9rem] leading-[1.55] text-[#555] whitespace-pre-wrap',
+                                  theme.borderAccent
+                                )}>
+                                  {chunk.explanation.split('**').map((text, i) =>
+                                    i % 2 === 1
+                                      ? <strong key={i} className={cn('font-bold', theme.accentClass)}>{text}</strong>
+                                      : text
+                                  )}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      </TabsContent>
+                    );
+                  })}
+                </Tabs>
+              </div>
+
+              {/* ====== Summary ====== */}
+              <div className="bg-white border border-gray-200">
+                <div className="flex items-center justify-between border-b border-gray-100 px-3 py-2">
+                  <Toolbar />
+                  <span className="px-3 py-1 text-sm font-bold font-sefer rounded-sm bg-[#722F37] text-white">
+                    סיכום
+                  </span>
+                </div>
+                <div className="px-6 py-4 font-sefer text-[0.95rem] leading-[1.6] text-[#333] text-right" dir="rtl">
+                  {previewSummary.trim() ? (
+                    previewSummary
+                      .split('\n')
+                      .map(line => line.trim())
+                      .filter(Boolean)
+                      .map((line, idx) => {
+                        const headerMatch = line.match(/^##\s+(.+)$/);
+                        if (headerMatch) {
+                          return (
+                            <h3 key={idx} className="text-base font-bold text-[#722F37] mt-4 mb-1 font-sefer first:mt-0 border-b border-[#722F37]/15 pb-1">
+                              {headerMatch[1]}
+                            </h3>
+                          );
+                        }
+                        const bulletMatch = line.match(/^(?:[-*]|\u2022|\d+\.)\s+(.+)$/);
+                        if (bulletMatch) {
+                          return (
+                            <p key={idx} className="pr-3 relative mb-0.5">
+                              <span className="absolute right-0 top-0 text-[#722F37] font-bold">-</span>
+                              {bulletMatch[1]!.split('**').map((text, i) =>
+                                i % 2 === 1
+                                  ? <strong key={i} className="text-[#722F37] font-bold">{text}</strong>
+                                  : text
+                              )}
+                            </p>
+                          );
+                        }
+                        return (
+                          <p key={idx} className="mb-0.5">
+                            {line.split('**').map((text, i) =>
+                              i % 2 === 1
+                                ? <strong key={i} className="text-[#722F37] font-bold">{text}</strong>
+                                : text
+                            )}
+                          </p>
+                        );
+                      })
+                  ) : (
+                    <p className="text-gray-400">לא נוצר סיכום.</p>
+                  )}
                 </div>
               </div>
 
-              <div className="flex flex-col sm:flex-row gap-4 pt-6 border-t">
+              {/* Bottom Action Buttons */}
+              <div className="flex gap-2 justify-center pt-1 pb-8">
                 <Button
                   onClick={handleExport}
-                  className="w-full h-16 text-xl bg-primary hover:bg-primary/90 text-white rounded-2xl shadow-xl transition-all gap-2"
+                  size="sm"
+                  className="h-9 text-sm bg-[#722F37] hover:bg-[#5a252c] text-white rounded gap-2"
                 >
-                  לייצא ל-Google Docs <ArrowRight className="w-6 h-6 rotate-180" />
+                  לייצא ל-Google Docs <ArrowRight className="w-4 h-4 rotate-180" />
                 </Button>
                 <Button
                   variant="outline"
+                  size="sm"
                   onClick={() => setStatus('idle')}
-                  className="w-full h-16 text-xl rounded-2xl transition-all"
+                  className="h-9 text-sm rounded"
                 >
-                  חזור לעמוד הראשי
+                  חזור
                 </Button>
               </div>
-            </Card>
-          </div>
-        )}
+            </div>
+          );
+        })()}
 
         {status === 'success' && (
           <div className="space-y-10 animate-in fade-in slide-in-from-bottom-4">

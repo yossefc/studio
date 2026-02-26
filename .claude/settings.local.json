@@ -21,7 +21,9 @@
       "WebFetch(domain:ai.google.dev)",
       "Bash(timeout:*)",
       "Bash(powershell -Command:*)",
-      "Bash(node -e:*)"
+      "Bash(node -e:*)",
+      "WebFetch(domain:alhatorah.org)",
+      "WebFetch(domain:jewishaction.com)"
     ]
   }
 }

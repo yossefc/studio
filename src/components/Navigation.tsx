@@ -24,12 +24,12 @@ export function Navigation() {
   ];
 
   return (
-    <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-border py-2 px-6 flex justify-around items-center z-50 md:top-0 md:bottom-auto md:justify-start md:gap-8">
+    <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-border py-2 px-6 flex justify-around items-center z-50 md:top-0 md:bottom-auto md:justify-start md:gap-8 print:hidden">
       <div className="hidden md:block font-headline text-primary text-xl font-bold ml-8">TalmudAI</div>
-      
+
       {links.map(({ href, label, icon: Icon }) => (
-        <Link 
-          key={href} 
+        <Link
+          key={href}
           href={href}
           className={cn(
             "flex flex-col items-center gap-1 text-xs font-medium transition-colors md:flex-row md:text-sm md:gap-2 px-3 py-1 rounded-md",

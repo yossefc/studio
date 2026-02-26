@@ -55,32 +55,42 @@ function validateHebrewOutput(text: string): boolean {
 
 /* ---- Tref → Firestore path ---- */
 
-const SECTION_KEY_MAP: Record<string, string> = {
-  'shulchan arukh, orach chayim': 'orach_chayim',
-  'orach chayim': 'orach_chayim',
-  'shulchan arukh, yoreh deah': 'yoreh_deah',
-  'yoreh deah': 'yoreh_deah',
-  'shulchan arukh, even haezer': 'even_haezer',
-  'even haezer': 'even_haezer',
-  'shulchan arukh, choshen mishpat': 'choshen_mishpat',
-  'choshen mishpat': 'choshen_mishpat',
-};
-
 function parseTrefForPath(normalizedTref: string): { sectionKey: string; siman: string; seif: string } {
-  const match = normalizedTref.match(/^(.+?)\s+(\d+)(?::(\d+))?$/);
-  if (!match) return { sectionKey: 'unknown', siman: '0', seif: '0' };
-  const sectionEng = match[1].trim().toLowerCase();
-  return {
-    sectionKey: SECTION_KEY_MAP[sectionEng] || sectionEng.replace(/[^a-z0-9]+/g, '_'),
-    siman: match[2],
-    seif: match[3] || '0',
-  };
+  const lowerTref = normalizedTref.toLowerCase();
+  let sectionKey = 'unknown';
+
+  if (lowerTref.includes('orach chayim') || lowerTref.includes('mishnah berurah')) {
+    sectionKey = 'orach_chayim'; // MB is only OC
+  } else if (lowerTref.includes('yoreh deah')) {
+    sectionKey = 'yoreh_deah';
+  } else if (lowerTref.includes('even haezer')) {
+    sectionKey = 'even_haezer';
+  } else if (lowerTref.includes('choshen mishpat')) {
+    sectionKey = 'choshen_mishpat';
+  } else {
+    // Fallback if structured differently
+    const matchFallback = lowerTref.match(/^(.+?)\s+\d+/);
+    if (matchFallback) {
+      sectionKey = matchFallback[1].replace(/[^a-z0-9]+/g, '_');
+    }
+  }
+
+  let siman = '0';
+  let seif = '0';
+  const match = normalizedTref.match(/(\d+)(?::(\d+))?[\s\w]*$/);
+
+  if (match) {
+    siman = match[1] || '0';
+    seif = match[2] || '0';
+  }
+
+  return { sectionKey, siman, seif };
 }
 
 /** Build Firestore path for the new rabanout structure. */
 function rabanutDocPath(input: { normalizedTref: string; sourceKey: string; chunkOrder: number }): string {
   const { sectionKey, siman, seif } = parseTrefForPath(input.normalizedTref);
-  return `rabanout/${sectionKey}/simanim/${siman}/seifim/${seif}/${input.sourceKey}/${input.chunkOrder}`;
+  return `rabanout/${sectionKey}/${siman}/${seif}/${input.sourceKey}/${input.chunkOrder}`;
 }
 
 /** Legacy hash-based cache key (for reading old entries). */
@@ -181,24 +191,32 @@ export const talmudAIChatbotExplanationFlow = ai.defineFlow(
       ? `\nמשנה ברורה על הסעיף:\n${input.companionText}\n\nלאחר ביאור ה${sourceLabel}, הוסף סעיף נפרד בכותרת "משנה ברורה:" וציין בנקודות קצרות את חידושי המשנה ברורה, הערותיו, ופסיקותיו המעשיות. ציין מספר ס"ק כשידוע.\n`
       : '';
 
+    const beitYosefAddition = input.sourceKey === 'beit_yosef'
+      ? `\nהוספה לבית יוסף: בסוף כל דעה כתוב שורת סיכום קצרה של אותה דעה. אם כמה דעות אומרות אותו עיקרון, קבץ אותן יחד תחת סיכום משותף.\n`
+      : '';
+
     const basePrompt = `אתה מסביר תורני מקצועי. הקהל הוא תלמיד המתכונן למבחן רבנות.
 ענה בעברית בלבד.
 
+מטרתך היא מינימליזם מוחלט: להסביר *אך ורק* מה שבאמת דורש הסבר. אל תאריך במילים ואל תפרש טקסט שמובן מאליו!
+
 כללים מחייבים:
 1. העתק את כל מילות המקור לפי הסדר, בלי לדלג על אף מילה. הדגש כל מילת מקור בפורמט **bold**.
-2. אחרי כל ביטוי קשה או לא ברור, הוסף הסבר קצר שזורם בצורה טבעית – לא בסוגריים אלא כהמשך ישיר של המשפט. אם הביטוי ברור – אל תוסיף כלום, פשוט המשך למילה הבאה.
-3. קטעים בארמית (ציטוטים מהגמרא או ממקורות אחרים): תרגם והסבר אותם בעברית פשוטה מיד אחרי הציטוט. הארמית לא ברורה לתלמיד – תמיד תסביר אותה.
-4. פתח ראשי תיבות לידם, בלי סוגריים (לדוגמה: **מ"ב** משנה ברורה).
-5. כשמוזכר פוסק/דעה: ציין מפורש מי אומר, מה הדין שלו, ומהיכן הוא (לדוגמה: **הרמב"ם** פוסק ש... כמובא ב**טור**).
-6. אם יש מחלוקת: ציין כל שיטה עם שם בעליה, ובסוף כתוב את ההכרעה – מי פוסקים הלכה.
-7. אל תכתוב פתיח, סיום, הערות, או הקדמה. אסור לכתוב דברים כמו "בטח", "הנה", "בהצלחה", "כתוב בעברית תקנית". תתחיל ישר עם הטקסט.
-8. אל תוסיף דעות או מקורות שלא מוזכרים בטקסט המקור.
+2. **התערבות מינימלית (חובה):** הוסף הסבר קצר (כהמשך ישיר של המשפט, ללא סוגריים) **אך ורק** בשלושת המקרים הבאים:
+   - **ארמית:** תרגם והסבר קטעים בארמית בעברית פשוטה.
+   - **מושגים מורכבים:** באר ביטויים קשים, נדירים או לא ברורים.
+   - **השלמת הקשר:** הוסף רקע קצרצר רק במקום שבו הטקסט חסר או לא מובן ללא ההקשר.
+   *אם המשפט המקורי מובן וברור בעברית - אל תוסיף לו אפילו מילה אחת של הסבר! פשוט העתק אותו מודגש והמשך הלאה.*
+3. פתח ראשי תיבות לידם, בלי סוגריים (לדוגמה: **מ"ב** משנה ברורה).
+4. כשמוזכר פוסק/דעה: ציין מפורש מי אומר, ומהיכן הוא (לדוגמה: **הרמב"ם** פוסק ש... כמובא ב**טור**).
+5. חוק עליון - ללא תוספות: אל תכתוב פתיח, סיום, הערות, או הקדמה (אסור לכתוב "בטח", "הנה"). תתחיל ישר עם הטקסט.
+6. אל תוסיף דעות או מקורות שלא מוזכרים בטקסט המקור.
 
-${contextPrompt}${companionSection}
+${beitYosefAddition}${contextPrompt}${companionSection}
 מקור להסבר (${sourceLabel}):
 ${input.currentSegment}
 
-ביאור:`;
+ביאור מינימליסטי וממוקד:`;
 
     const generated = await generateTextWithFallback({
       prompt: basePrompt,

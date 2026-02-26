@@ -69,15 +69,17 @@ export async function fetchRabanutData(idToken: string): Promise<RabanutSection[
         const sectionKey = sectionRef.id;
         const sectionLabel = SECTION_LABELS[sectionKey] || sectionKey;
 
-        const simanRefs = await sectionRef.collection('simanim').listDocuments();
+        // Siman numbers are direct sub-collections of the section document
+        const simanRefs = await sectionRef.listCollections();
         const simanim: RabanutSiman[] = [];
 
-        for (const simanRef of simanRefs) {
-            const simanNum = simanRef.id;
-            const seifRefs = await simanRef.collection('seifim').listDocuments();
+        for (const simanCol of simanRefs) {
+            const simanNum = simanCol.id;
+            // Seif numbers are documents within the siman collection
+            const seifDocs = await simanCol.listDocuments();
             const seifim: RabanutSeif[] = [];
 
-            for (const seifRef of seifRefs) {
+            for (const seifRef of seifDocs) {
                 const seifNum = seifRef.id;
                 const sources: Record<string, RabanutTextChunk[]> = {};
 

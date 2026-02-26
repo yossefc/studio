@@ -1,11 +1,20 @@
 'use server';
 
-import { fetchSefariaText, buildSefariaRef, SOURCE_CONFIGS, SOURCE_PROCESSING_ORDER } from '@/lib/sefaria-api';
-import type { SourceKey, SefariaResponse } from '@/lib/sefaria-api';
-import { chunkText, type TextChunk } from '@/lib/chunker';
+import {
+  fetchSefariaText,
+  buildSefariaRef,
+  SOURCE_CONFIGS,
+  SOURCE_PROCESSING_ORDER,
+  resolveFetchMode,
+  getLinkedSourcesForShulchanArukhSeif,
+  getTurSegmentsForSeif,
+} from '@/lib/sefaria-api';
+import type { SourceKey, SefariaResponse, FetchMode, StructuredChunk } from '@/lib/sefaria-api';
+import { chunkStructuredText, type TextChunk } from '@/lib/chunker';
 import { explainTalmudSegment } from '@/ai/flows/talmud-ai-chatbot-explanation';
 import { summarizeTalmudStudyGuide } from '@/ai/flows/talmud-ai-summary';
 import { createStudyGuideDoc } from '@/lib/google-docs';
+import { getOrBuildSimanAlignment } from './siman-alignment';
 import { getEffectiveModel } from '@/ai/genkit';
 import { logGenerationMetrics } from '@/lib/metrics';
 import { getAdminDb } from '@/server/firebase-admin';
@@ -18,6 +27,8 @@ export interface ProcessedChunk {
   rawText: string;
   explanation: string;
   rawHash: string;
+  sourceRef?: string;
+  sourcePath?: number[];
   cacheHit: boolean;
   orderIndex: number;
   modelUsed?: string;
@@ -212,6 +223,10 @@ async function loadCanonicalGuide(cacheKey: string): Promise<GenerationResult['g
       rawText,
       explanation: explanationText,
       rawHash: typeof chunk.rawHash === 'string' ? chunk.rawHash : '',
+      sourceRef: typeof chunk.sourceRef === 'string' ? chunk.sourceRef : undefined,
+      sourcePath: Array.isArray(chunk.sourcePath)
+        ? chunk.sourcePath.filter((part: unknown): part is number => typeof part === 'number')
+        : undefined,
       cacheHit: true,
       orderIndex: typeof chunk.orderIndex === 'number' ? chunk.orderIndex : source.chunks.length,
       modelUsed: typeof chunk.modelUsed === 'string' ? chunk.modelUsed : undefined,
@@ -305,6 +320,8 @@ async function saveCanonicalGuide(
         rawText: chunk.rawText,
         explanationText: chunk.explanation,
         rawHash: chunk.rawHash,
+        sourceRef: chunk.sourceRef || null,
+        sourcePath: chunk.sourcePath || null,
         modelUsed: chunk.modelUsed || null,
         validated: chunk.validated ?? false,
         updatedAt: FieldValue.serverTimestamp(),
@@ -336,6 +353,249 @@ async function isCancelled(userId: string, guideId: string): Promise<boolean> {
   }
 }
 
+type SourceFetchPayload = {
+  sourceKey: SourceKey;
+  tref: string;
+  data: SefariaResponse;
+  fetchMode: FetchMode;
+};
+
+function parsePositiveInt(value?: string): number | null {
+  if (!value) return null;
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return null;
+  }
+  return parsed;
+}
+
+function dedupeStructuredSegments(segments: StructuredChunk[]): StructuredChunk[] {
+  const seen = new Set<string>();
+  const deduped: StructuredChunk[] = [];
+
+  for (const segment of segments) {
+    const pathKey = Array.isArray(segment.path) ? segment.path.join('.') : '';
+    const key = `${segment.ref}|${pathKey}|${segment.text}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    deduped.push(segment);
+  }
+
+  return deduped;
+}
+
+function responseWithSegments(data: SefariaResponse, segments: StructuredChunk[]): SefariaResponse {
+  return {
+    ...data,
+    he: segments.map(segment => segment.text),
+    segments,
+  };
+}
+
+function segmentMatchesRef(segmentRef: string, targetRef: string): boolean {
+  return segmentRef === targetRef || segmentRef.startsWith(`${targetRef}:`);
+}
+
+async function fetchSegmentsFromRefs(
+  request: MultiSourceRequest,
+  sourceKey: SourceKey,
+  refs: string[],
+): Promise<StructuredChunk[]> {
+  const uniqueRefs = [...new Set(refs.map(ref => ref.trim()).filter(Boolean))];
+  if (uniqueRefs.length === 0) return [];
+
+  const settled = await Promise.allSettled(uniqueRefs.map(ref => fetchSefariaText(ref, 'he')));
+  const fetched: StructuredChunk[] = [];
+
+  for (const result of settled) {
+    if (result.status === 'fulfilled') {
+      fetched.push(...result.value.segments);
+    }
+  }
+
+  if (fetched.length > 0) {
+    return dedupeStructuredSegments(fetched);
+  }
+
+  // Fallback: fetch full siman once and select segments by ref/prefix match.
+  const fullSimanRef = buildSefariaRef(sourceKey, request.section, request.siman);
+  const fullSimanData = await fetchSefariaText(fullSimanRef, 'he');
+  const matched = fullSimanData.segments.filter(segment =>
+    uniqueRefs.some(ref => segmentMatchesRef(segment.ref, ref)),
+  );
+
+  return dedupeStructuredSegments(matched);
+}
+
+async function fetchSourceWithStrategy(
+  request: MultiSourceRequest,
+  sourceKey: SourceKey,
+): Promise<SourceFetchPayload> {
+  const fetchMode = resolveFetchMode(sourceKey);
+  const simanNum = parsePositiveInt(request.siman);
+  const seifNum = parsePositiveInt(request.seif);
+
+  // Tur & Beit Yosef -> use the Siman Alignment Engine
+  if (fetchMode === 'linked-passages' && simanNum && seifNum) {
+    if (sourceKey === 'tur') {
+      try {
+        const alignment = await getOrBuildSimanAlignment(request.section, simanNum);
+        let providedStartIndex: number | null = null;
+        let providedEndIndex: number | null = null;
+
+        if (alignment) {
+          const map = alignment.seifMap;
+          const currentMapping = map[seifNum.toString()];
+          if (currentMapping && currentMapping.byRefs.length > 0) {
+            const indices = currentMapping.byRefs
+              .map(ref => {
+                const match = ref.match(/(\d+)[:\s](\d+)/);
+                return match ? parseInt(match[2], 10) : null;
+              })
+              .filter((i): i is number => i !== null)
+              .sort((a, b) => a - b);
+            if (indices.length > 0) providedStartIndex = indices[0];
+          }
+          let seekEnd = seifNum + 1;
+          while (seekEnd <= simanNum + 5) {
+            const nextMap = map[seekEnd.toString()];
+            if (nextMap && nextMap.byRefs.length > 0 && nextMap.byMode === 'linked-passages') {
+              const indices = nextMap.byRefs
+                .map(ref => {
+                  const match = ref.match(/(\d+)[:\s](\d+)/);
+                  return match ? parseInt(match[2], 10) : null;
+                })
+                .filter((i): i is number => i !== null)
+                .sort((a, b) => a - b);
+
+              const validEndIndices = indices.filter(i => providedStartIndex === null || i > providedStartIndex);
+              if (validEndIndices.length > 0) {
+                providedEndIndex = validEndIndices[0];
+                break;
+              }
+            }
+            seekEnd++;
+          }
+        }
+
+        const turSegments = await getTurSegmentsForSeif(request.section, simanNum, seifNum, providedStartIndex, providedEndIndex);
+        if (turSegments.length > 0) {
+          const syntheticData = responseWithSegments({
+            ref: turSegments[0].ref,
+            he: [],
+            segments: [],
+            en: [],
+            direction: 'rtl',
+          }, turSegments);
+
+          return {
+            sourceKey,
+            tref: syntheticData.ref,
+            data: syntheticData,
+            fetchMode: 'linked-passages',
+          };
+        }
+      } catch (error) {
+        console.warn(`[Action] Tur boundary slicing failed for ${request.section} ${simanNum}:${seifNum}, fallback to alignment cache:`, error);
+      }
+    }
+
+    try {
+      const alignment = await getOrBuildSimanAlignment(request.section, simanNum);
+      if (alignment) {
+        const mapping = alignment.seifMap[seifNum.toString()];
+
+        if (mapping) {
+          if (sourceKey === 'beit_yosef' && mapping.byMode !== 'linked-passages') {
+            const emptyRef = buildSefariaRef(sourceKey, request.section, request.siman) + `:${seifNum}`;
+            const syntheticData = responseWithSegments({
+              ref: emptyRef,
+              he: [],
+              segments: [],
+              en: [],
+              direction: 'rtl',
+            }, []);
+            return {
+              sourceKey,
+              tref: emptyRef,
+              data: syntheticData,
+              fetchMode: 'linked-passages',
+            };
+          }
+
+          const refs = sourceKey === 'tur' ? mapping.turRefs : mapping.byRefs;
+          const segments = await fetchSegmentsFromRefs(request, sourceKey, refs);
+          const syntheticData = responseWithSegments({
+            ref: refs[0] || buildSefariaRef(sourceKey, request.section, request.siman),
+            he: [],
+            segments: [],
+            en: [],
+            direction: 'rtl',
+          }, segments);
+
+          return {
+            sourceKey,
+            tref: syntheticData.ref,
+            data: syntheticData,
+            fetchMode: 'linked-passages',
+          };
+        } else {
+          console.warn(`[Action] ${sourceKey}: no mapping found for seif ${seifNum} in seifMap (keys: ${Object.keys(alignment.seifMap).join(',')}).`);
+        }
+      }
+    } catch (error) {
+      console.warn(`[Action] Alignment cache lookup failed for ${sourceKey}, trying direct links:`, error);
+
+      try {
+        const linked = await getLinkedSourcesForShulchanArukhSeif(request.section, simanNum, seifNum);
+        const refs = sourceKey === 'tur' ? linked.turRefs : linked.beitYosefRefs;
+        if (refs.length > 0) {
+          const segments = await fetchSegmentsFromRefs(request, sourceKey, refs);
+          const syntheticData = responseWithSegments({
+            ref: refs[0],
+            he: [],
+            segments: [],
+            en: [],
+            direction: 'rtl',
+          }, segments);
+
+          return {
+            sourceKey,
+            tref: syntheticData.ref,
+            data: syntheticData,
+            fetchMode: 'linked-passages',
+          };
+        }
+      } catch (linksError) {
+        console.warn(`[Action] Direct links fallback failed for ${sourceKey}:`, linksError);
+      }
+    }
+  }
+
+  // Exact seif fetch (Shulchan Arukh, Mishnah Berurah)
+  if (fetchMode === 'exact-seif' && request.seif) {
+    const exactSeifTref = buildSefariaRef(sourceKey, request.section, request.siman, request.seif);
+    const exactSeifData = await fetchSefariaText(exactSeifTref, 'he');
+    return {
+      sourceKey,
+      tref: exactSeifData.ref,
+      data: exactSeifData,
+      fetchMode: 'exact-seif',
+    };
+  }
+
+  // Fallback for everything else
+  const fullSimanTref = buildSefariaRef(sourceKey, request.section, request.siman);
+  const fullSimanData = await fetchSefariaText(fullSimanTref, 'he');
+
+  return {
+    sourceKey,
+    tref: fullSimanData.ref,
+    data: fullSimanData,
+    fetchMode: 'full-siman',
+  };
+}
+
 async function processSourceChunks(
   rawChunks: TextChunk[],
   tref: string,
@@ -344,6 +604,7 @@ async function processSourceChunks(
   userId: string,
   guideId: string,
   companionText: string | undefined,
+  onChunkDone?: () => void,
 ): Promise<{ chunks: ProcessedChunk[]; cacheHits: number; cancelled: boolean }> {
   const processed: ProcessedChunk[] = [];
   let cacheHits = 0;
@@ -357,6 +618,8 @@ async function processSourceChunks(
       return { chunks: processed, cacheHits, cancelled: true };
     }
 
+    const rawHash = createHash('sha256').update(chunk.text).digest('hex');
+
     const result = await explainTalmudSegment({
       currentSegment: chunk.text,
       previousSegments: previousSegment ? [previousSegment] : [],
@@ -364,7 +627,7 @@ async function processSourceChunks(
       modelName,
       normalizedTref: tref,
       chunkOrder: i,
-      rawHash: chunk.rawHash,
+      rawHash,
       sourceKey,
       companionText: sourceKey === 'shulchan_arukh' ? companionText : undefined,
     });
@@ -372,10 +635,12 @@ async function processSourceChunks(
     if (result.cacheHit) cacheHits += 1;
 
     processed.push({
-      id: chunk.id,
+      id: `${sourceKey}-${i}`,
       rawText: chunk.text,
       explanation: result.explanation,
-      rawHash: chunk.rawHash,
+      rawHash,
+      sourceRef: chunk.ref,
+      sourcePath: chunk.path,
       cacheHit: result.cacheHit,
       orderIndex: i,
       modelUsed: result.modelUsed,
@@ -384,6 +649,8 @@ async function processSourceChunks(
 
     previousSegment = chunk.text;
     previousExplanation = result.explanation;
+
+    if (onChunkDone) onChunkDone();
   }
 
   return { chunks: processed, cacheHits, cancelled: false };
@@ -436,45 +703,36 @@ export async function generateMultiSourceStudyGuide(
 
     hasCanonicalLock = canonicalState === 'acquired';
 
-    // 1. Build refs for each selected source
-    const refsToFetch = request.sources
-      .filter(s => s !== 'mishnah_berurah') // MB is fetched but not processed as a standalone section
-      .map(sourceKey => ({
-        sourceKey,
-        tref: buildSefariaRef(sourceKey, request.section, request.siman, request.seif),
-      }));
+    // 2. Fetch selected sources (Tur/Beit Yosef use linked-passages strategy).
+    const sourceFetchPromises = request.sources
+      .filter(s => s !== 'mishnah_berurah') // MB is fetched as companion, not a standalone explanation source
+      .map(sourceKey => fetchSourceWithStrategy(request, sourceKey));
 
-    // Also fetch Mishnah Berurah if selected (as companion for SA)
+    // Also fetch Mishnah Berurah if selected (as companion for SA).
     let mbRef: string | undefined;
     if (request.sources.includes('mishnah_berurah')) {
       mbRef = buildSefariaRef('mishnah_berurah', request.section, request.siman, request.seif);
     }
 
-    // 2. Parallel fetch all sources
-    const fetchPromises = refsToFetch.map(async ({ sourceKey, tref }) => {
-      const data = await fetchSefariaText(tref, 'he');
-      return { sourceKey, tref: data.ref, data };
-    });
-
     const mbPromise = mbRef
-      ? fetchSefariaText(mbRef, 'he').catch((err) => {
-        console.warn('[Action] Mishnah Berurah fetch failed, proceeding without:', err);
+      ? fetchSefariaText(mbRef, 'he').catch((error) => {
+        console.warn('[Action] Mishnah Berurah fetch failed, proceeding without:', error);
         return null;
       })
       : Promise.resolve(null);
 
     const [fetchResults, mbData] = await Promise.all([
-      Promise.allSettled(fetchPromises),
+      Promise.allSettled(sourceFetchPromises),
       mbPromise,
     ]);
 
-    // Prepare MB companion text
+    // Prepare MB companion text.
     const companionText = mbData
       ? (Array.isArray(mbData.he) ? mbData.he : []).join(' ').trim() || undefined
       : undefined;
 
-    // 3. Count total chunks to pick model
-    const sourceFetches: { sourceKey: SourceKey; tref: string; data: SefariaResponse }[] = [];
+    // 3. Collect successful source fetches and count total chunks to pick model.
+    const sourceFetches: SourceFetchPayload[] = [];
     for (const result of fetchResults) {
       if (result.status === 'fulfilled') {
         sourceFetches.push(result.value);
@@ -487,23 +745,54 @@ export async function generateMultiSourceStudyGuide(
       throw new Error('לא הצלחנו לקבל טקסט מאף מקור שנבחר.');
     }
 
-    // Pre-chunk to count total
+    // Pre-chunk to count total while preserving source structure.
     const sourceChunkMap = new Map<SourceKey, { tref: string; chunks: TextChunk[] }>();
-    for (const { sourceKey, tref, data } of sourceFetches) {
-      const heTexts = Array.isArray(data.he) ? data.he : [];
-      const content = heTexts.join(' ');
-      if (!content.trim()) continue;
+    for (const { sourceKey, tref, data, fetchMode } of sourceFetches) {
+      const segments: StructuredChunk[] = Array.isArray(data.segments) && data.segments.length > 0
+        ? data.segments
+        : (Array.isArray(data.he) ? data.he : []).map((text, index) => ({
+          ref: tref,
+          path: [index],
+          text,
+        }));
 
-      const allChunks = chunkText(content, tref, sourceKey);
+      if (!segments.length) {
+        continue;
+      }
+
+      const allChunks = chunkStructuredText(segments, sourceKey);
       const limited = allChunks.slice(0, MAX_CHUNKS_PER_SOURCE);
       if (allChunks.length > MAX_CHUNKS_PER_SOURCE) {
         console.warn(`[Action] ${sourceKey}: ${allChunks.length} chunks, limiting to ${MAX_CHUNKS_PER_SOURCE}.`);
+      }
+      if (fetchMode === 'linked-passages') {
+        console.info(`[Action] ${sourceKey}: using linked passages (${segments.length} structured segments).`);
+      } else if (fetchMode === 'full-siman') {
+        console.info(`[Action] ${sourceKey}: using full siman strategy (${segments.length} structured segments).`);
       }
       sourceChunkMap.set(sourceKey, { tref, chunks: limited });
       totalChunkCount += limited.length;
     }
 
     const modelToUse = getEffectiveModel(totalChunkCount);
+
+    // Write total chunk count to Firestore so the client can show a progress bar
+    const db = getAdminDb();
+    const guideRef = db.collection('users').doc(userId).collection('studyGuides').doc(guideId);
+    await guideRef.update({
+      progressDone: 0,
+      progressTotal: totalChunkCount,
+      progressPhase: 'chunks',
+    });
+
+    // Shared progress counter (atomic via closure since sources run in parallel)
+    let progressDone = 0;
+    const reportProgress = async () => {
+      progressDone += 1;
+      try {
+        await guideRef.update({ progressDone });
+      } catch { /* ignore progress write errors */ }
+    };
 
     // 4. Process all sources in PARALLEL (each source still processes chunks sequentially for context)
     const sourceResults: SourceResult[] = [];
@@ -523,6 +812,7 @@ export async function generateMultiSourceStudyGuide(
           userId,
           guideId,
           companionText,
+          reportProgress,
         );
 
         return { sourceKey, result, tref, config };
@@ -569,6 +859,11 @@ export async function generateMultiSourceStudyGuide(
     const allExplanations = sourceResults
       .map(sr => `--- ${sr.hebrewLabel} ---\n` + sr.chunks.map(c => c.explanation).join('\n\n'))
       .join('\n\n');
+
+    // Update progress phase to 'summary'
+    try {
+      await guideRef.update({ progressPhase: 'summary' });
+    } catch { /* ignore */ }
 
     const summaryResult = await summarizeTalmudStudyGuide({
       studyGuideText: allExplanations,
