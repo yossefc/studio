@@ -1,0 +1,7 @@
+
+> nextn@0.1.0 typecheck
+> tsc --noEmit
+
+check-regex-direct.ts(46,74): error TS2345: Argument of type 'number | undefined' is not assignable to parameter of type 'number'.
+  Type 'undefined' is not assignable to type 'number'.
+check-regex-direct.ts(46,83): error TS18048: 'm.index' is possibly 'undefined'.

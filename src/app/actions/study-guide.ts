@@ -47,6 +47,9 @@ export interface MultiSourceRequest {
   siman: string;
   seif?: string;
   sources: SourceKey[];
+  torahOhrPassagesOnly?: boolean;
+  manualTurText?: string;
+  manualByText?: string;
 }
 
 export interface GenerationResult {
@@ -64,7 +67,7 @@ export interface GenerationResult {
 }
 
 const CANONICAL_COLLECTION = 'canonicalStudyGuides';
-const CANONICAL_CACHE_VERSION = 'v1';
+const CANONICAL_CACHE_VERSION = 'v7';
 const CANONICAL_LOCK_STALE_MS = 10 * 60 * 1000;
 const CANONICAL_READY_WAIT_ATTEMPTS = 20;
 const CANONICAL_READY_WAIT_MS = 1500;
@@ -81,15 +84,23 @@ function normalizePart(value: string | undefined): string {
 
 function buildCanonicalCacheKey(request: MultiSourceRequest): string {
   const sourcePart = sortSources(request.sources).join(',');
-  const raw = [
+  const rawParts = [
     CANONICAL_CACHE_VERSION,
     normalizePart(request.section),
     normalizePart(request.siman),
     normalizePart(request.seif),
     sourcePart,
-  ].join('|');
+    request.torahOhrPassagesOnly ? 'torah_ohr_passages_only' : '',
+  ];
 
-  return createHash('sha256').update(raw).digest('hex');
+  const manualTur = normalizePart(request.manualTurText);
+  const manualBy = normalizePart(request.manualByText);
+
+  if (manualTur || manualBy) {
+    rawParts.push(manualTur, manualBy);
+  }
+
+  return createHash('sha256').update(rawParts.join('|')).digest('hex');
 }
 
 function toMillis(value: unknown): number {
@@ -111,6 +122,14 @@ function sleep(ms: number): Promise<void> {
 
 function isKnownSourceKey(value: unknown): value is SourceKey {
   return typeof value === 'string' && value in SOURCE_CONFIGS;
+}
+
+function getChunkLimitForSource(sourceKey: SourceKey): number {
+  // Torah Ohr can contain long maamarim; truncating to the generic cap drops large parts.
+  if (sourceKey === 'torah_ohr') {
+    return Number.POSITIVE_INFINITY;
+  }
+  return MAX_CHUNKS_PER_SOURCE;
 }
 
 async function tryAcquireCanonicalLock(
@@ -341,6 +360,86 @@ async function markCanonicalFailed(cacheKey: string, reason: string): Promise<vo
   }, { merge: true });
 }
 
+async function persistGuideResultForUser(
+  userId: string,
+  guideId: string,
+  guideData: NonNullable<GenerationResult['guideData']>,
+): Promise<void> {
+  const db = getAdminDb();
+  const guideRef = db.collection('users').doc(userId).collection('studyGuides').doc(guideId);
+  const existingGuide = await guideRef.get();
+  const nowIso = new Date().toISOString();
+
+  const existingTref = existingGuide.exists && typeof existingGuide.get('tref') === 'string'
+    ? existingGuide.get('tref') as string
+    : guideData.tref;
+  const existingCreatedAt = existingGuide.exists && typeof existingGuide.get('createdAt') === 'string'
+    ? existingGuide.get('createdAt') as string
+    : nowIso;
+
+  const totalChunks = guideData.sourceResults.reduce((sum, source) => sum + source.chunks.length, 0);
+
+  await guideRef.set({
+    id: guideId,
+    userId,
+    tref: existingTref,
+    sefariaRef: guideData.tref,
+    language: 'he',
+    status: 'Preview',
+    summaryText: guideData.summary,
+    googleDocUrl: existingGuide.exists && typeof existingGuide.get('googleDocUrl') === 'string'
+      ? existingGuide.get('googleDocUrl')
+      : '',
+    googleDocId: existingGuide.exists && typeof existingGuide.get('googleDocId') === 'string'
+      ? existingGuide.get('googleDocId')
+      : '',
+    validated: guideData.validated ?? false,
+    sources: guideData.sources,
+    createdAt: existingCreatedAt,
+    updatedAt: nowIso,
+    progressDone: totalChunks,
+    progressTotal: totalChunks,
+    progressPhase: 'summary',
+  }, { merge: true });
+
+  const chunkWrites: Array<{ id: string; data: Record<string, unknown> }> = [];
+  for (const sr of guideData.sourceResults) {
+    for (const chunk of sr.chunks) {
+      chunkWrites.push({
+        id: chunk.id,
+        data: {
+          id: chunk.id,
+          studyGuideId: guideId,
+          userId,
+          sourceKey: sr.sourceKey,
+          hebrewLabel: sr.hebrewLabel,
+          tref: sr.tref,
+          orderIndex: chunk.orderIndex,
+          rawText: chunk.rawText,
+          rawHash: chunk.rawHash,
+          explanationText: chunk.explanation,
+          validated: chunk.validated ?? false,
+          sourceRef: chunk.sourceRef || null,
+          sourcePath: chunk.sourcePath || null,
+          modelUsed: chunk.modelUsed || null,
+          createdAt: nowIso,
+          updatedAt: nowIso,
+        },
+      });
+    }
+  }
+
+  const BATCH_LIMIT = 400;
+  for (let i = 0; i < chunkWrites.length; i += BATCH_LIMIT) {
+    const batch = db.batch();
+    const slice = chunkWrites.slice(i, i + BATCH_LIMIT);
+    for (const write of slice) {
+      batch.set(guideRef.collection('textChunks').doc(write.id), write.data, { merge: true });
+    }
+    await batch.commit();
+  }
+}
+
 async function isCancelled(userId: string, guideId: string): Promise<boolean> {
   if (!userId || !guideId) return false;
 
@@ -435,50 +534,154 @@ async function fetchSourceWithStrategy(
   const simanNum = parsePositiveInt(request.siman);
   const seifNum = parsePositiveInt(request.seif);
 
+  // Manual Text Override Support
+  const isTur = sourceKey === 'tur';
+  const isBy = sourceKey === 'beit_yosef';
+
+  if (isTur && request.manualTurText?.trim()) {
+    const syntheticRef = `Tur (Saisie Manuelle) - ${request.section} ${request.siman}:${request.seif || ''}`.trim();
+    const syntheticSegment: StructuredChunk = {
+      ref: syntheticRef,
+      text: request.manualTurText.trim()
+    };
+    const syntheticData = responseWithSegments({
+      ref: syntheticRef,
+      he: [],
+      segments: [],
+      en: [],
+      direction: 'rtl'
+    }, [syntheticSegment]);
+
+    console.info(`[Action] tur: using manual text input (${request.manualTurText.trim().split(/\\s+/).length} words)`);
+    return {
+      sourceKey,
+      tref: syntheticData.ref,
+      data: syntheticData,
+      fetchMode: 'linked-passages'
+    };
+  }
+
+  if (isBy && request.manualByText?.trim()) {
+    const syntheticRef = `Beit Yosef (Saisie Manuelle) - ${request.section} ${request.siman}:${request.seif || ''}`.trim();
+    const syntheticSegment: StructuredChunk = {
+      ref: syntheticRef,
+      text: request.manualByText.trim()
+    };
+    const syntheticData = responseWithSegments({
+      ref: syntheticRef,
+      he: [],
+      segments: [],
+      en: [],
+      direction: 'rtl'
+    }, [syntheticSegment]);
+
+    console.info(`[Action] beit_yosef: using manual text input (${request.manualByText.trim().split(/\\s+/).length} words)`);
+    return {
+      sourceKey,
+      tref: syntheticData.ref,
+      data: syntheticData,
+      fetchMode: 'linked-passages'
+    };
+  }
+
   // Tur & Beit Yosef -> use the Siman Alignment Engine
   if (fetchMode === 'linked-passages' && simanNum && seifNum) {
-    if (sourceKey === 'tur') {
+    if (sourceKey === 'beit_yosef') {
+      const fallbackRef = buildSefariaRef('beit_yosef', request.section, request.siman);
       try {
-        const alignment = await getOrBuildSimanAlignment(request.section, simanNum);
-        let providedStartIndex: number | null = null;
-        let providedEndIndex: number | null = null;
+        const linked = await getLinkedSourcesForShulchanArukhSeif(request.section, simanNum, seifNum);
+        const refs = linked.beitYosefRefs;
 
-        if (alignment) {
-          const map = alignment.seifMap;
-          const currentMapping = map[seifNum.toString()];
-          if (currentMapping && currentMapping.byRefs.length > 0) {
-            const indices = currentMapping.byRefs
-              .map(ref => {
-                const match = ref.match(/(\d+)[:\s](\d+)/);
-                return match ? parseInt(match[2], 10) : null;
-              })
-              .filter((i): i is number => i !== null)
-              .sort((a, b) => a - b);
-            if (indices.length > 0) providedStartIndex = indices[0];
-          }
-          let seekEnd = seifNum + 1;
-          while (seekEnd <= simanNum + 5) {
-            const nextMap = map[seekEnd.toString()];
-            if (nextMap && nextMap.byRefs.length > 0 && nextMap.byMode === 'linked-passages') {
-              const indices = nextMap.byRefs
-                .map(ref => {
-                  const match = ref.match(/(\d+)[:\s](\d+)/);
-                  return match ? parseInt(match[2], 10) : null;
-                })
-                .filter((i): i is number => i !== null)
-                .sort((a, b) => a - b);
-
-              const validEndIndices = indices.filter(i => providedStartIndex === null || i > providedStartIndex);
-              if (validEndIndices.length > 0) {
-                providedEndIndex = validEndIndices[0];
-                break;
-              }
-            }
-            seekEnd++;
-          }
+        if (refs.length > 0) {
+          const segments = await fetchSegmentsFromRefs(request, sourceKey, refs);
+          return {
+            sourceKey,
+            tref: refs[0] || fallbackRef,
+            data: responseWithSegments({
+              ref: refs[0] || fallbackRef,
+              he: [],
+              segments: [],
+              en: [],
+              direction: 'rtl',
+            }, segments),
+            fetchMode: 'linked-passages',
+          };
         }
 
-        const turSegments = await getTurSegmentsForSeif(request.section, simanNum, seifNum, providedStartIndex, providedEndIndex);
+        // No direct Sefaria links — fall through to alignment cache (which uses LLM alignment)
+        console.info(`[Action] beit_yosef: no direct Sefaria links for ${request.section} ${simanNum}:${seifNum}, trying alignment cache...`);
+      } catch (error) {
+        console.warn(
+          `[Action] beit_yosef: links lookup failed for ${request.section} ${simanNum}:${seifNum}, trying alignment cache:`,
+          error,
+        );
+      }
+    }
+
+    // For both Tur and BY: try alignment cache first (has LLM-computed slices)
+    try {
+      const alignment = await getOrBuildSimanAlignment(request.section, simanNum);
+      if (alignment) {
+        const mapping = alignment.seifMap[seifNum.toString()];
+
+        if (mapping) {
+          // Tur with pre-sliced text: use turTextSlice directly (giant Tur case)
+          if (sourceKey === 'tur' && mapping.turTextSlice) {
+            const turSimanRef = buildSefariaRef('tur', request.section, request.siman);
+            const sliceSegment: StructuredChunk = {
+              ref: `${turSimanRef} [Seif ${seifNum}]`,
+              text: mapping.turTextSlice,
+            };
+            const syntheticData = responseWithSegments({
+              ref: sliceSegment.ref,
+              he: [],
+              segments: [],
+              en: [],
+              direction: 'rtl',
+            }, [sliceSegment]);
+
+            console.info(`[Action] tur: using turTextSlice from alignment cache for ${request.section} ${simanNum}:${seifNum} (${mapping.turTextSlice.split(/\s+/).length} words)`);
+            return {
+              sourceKey,
+              tref: syntheticData.ref,
+              data: syntheticData,
+              fetchMode: 'linked-passages',
+            };
+          }
+
+          const refs = sourceKey === 'tur' ? mapping.turRefs : mapping.byRefs;
+          if (refs.length > 0) {
+            const segments = await fetchSegmentsFromRefs(request, sourceKey, refs);
+            if (segments.length > 0) {
+              const syntheticData = responseWithSegments({
+                ref: refs[0] || buildSefariaRef(sourceKey, request.section, request.siman),
+                he: [],
+                segments: [],
+                en: [],
+                direction: 'rtl',
+              }, segments);
+
+              console.info(`[Action] ${sourceKey}: using alignment cache refs for ${request.section} ${simanNum}:${seifNum}`);
+              return {
+                sourceKey,
+                tref: syntheticData.ref,
+                data: syntheticData,
+                fetchMode: 'linked-passages',
+              };
+            }
+          }
+        } else {
+          console.warn(`[Action] ${sourceKey}: no mapping found for seif ${seifNum} in seifMap (keys: ${Object.keys(alignment.seifMap).join(',')}).`);
+        }
+      }
+    } catch (error) {
+      console.warn(`[Action] Alignment cache lookup failed for ${sourceKey}:`, error);
+    }
+
+    // Tur fallback: boundary slicing (for cases where alignment cache has no data)
+    if (sourceKey === 'tur') {
+      try {
+        const turSegments = await getTurSegmentsForSeif(request.section, simanNum, seifNum);
         if (turSegments.length > 0) {
           const syntheticData = responseWithSegments({
             ref: turSegments[0].ref,
@@ -496,79 +699,33 @@ async function fetchSourceWithStrategy(
           };
         }
       } catch (error) {
-        console.warn(`[Action] Tur boundary slicing failed for ${request.section} ${simanNum}:${seifNum}, fallback to alignment cache:`, error);
+        console.warn(`[Action] Tur boundary slicing fallback failed for ${request.section} ${simanNum}:${seifNum}:`, error);
       }
     }
 
+    // Final fallback: direct Sefaria links
     try {
-      const alignment = await getOrBuildSimanAlignment(request.section, simanNum);
-      if (alignment) {
-        const mapping = alignment.seifMap[seifNum.toString()];
+      const linked = await getLinkedSourcesForShulchanArukhSeif(request.section, simanNum, seifNum);
+      const refs = sourceKey === 'tur' ? linked.turRefs : linked.beitYosefRefs;
+      if (refs.length > 0) {
+        const segments = await fetchSegmentsFromRefs(request, sourceKey, refs);
+        const syntheticData = responseWithSegments({
+          ref: refs[0],
+          he: [],
+          segments: [],
+          en: [],
+          direction: 'rtl',
+        }, segments);
 
-        if (mapping) {
-          if (sourceKey === 'beit_yosef' && mapping.byMode !== 'linked-passages') {
-            const emptyRef = buildSefariaRef(sourceKey, request.section, request.siman) + `:${seifNum}`;
-            const syntheticData = responseWithSegments({
-              ref: emptyRef,
-              he: [],
-              segments: [],
-              en: [],
-              direction: 'rtl',
-            }, []);
-            return {
-              sourceKey,
-              tref: emptyRef,
-              data: syntheticData,
-              fetchMode: 'linked-passages',
-            };
-          }
-
-          const refs = sourceKey === 'tur' ? mapping.turRefs : mapping.byRefs;
-          const segments = await fetchSegmentsFromRefs(request, sourceKey, refs);
-          const syntheticData = responseWithSegments({
-            ref: refs[0] || buildSefariaRef(sourceKey, request.section, request.siman),
-            he: [],
-            segments: [],
-            en: [],
-            direction: 'rtl',
-          }, segments);
-
-          return {
-            sourceKey,
-            tref: syntheticData.ref,
-            data: syntheticData,
-            fetchMode: 'linked-passages',
-          };
-        } else {
-          console.warn(`[Action] ${sourceKey}: no mapping found for seif ${seifNum} in seifMap (keys: ${Object.keys(alignment.seifMap).join(',')}).`);
-        }
+        return {
+          sourceKey,
+          tref: syntheticData.ref,
+          data: syntheticData,
+          fetchMode: 'linked-passages',
+        };
       }
-    } catch (error) {
-      console.warn(`[Action] Alignment cache lookup failed for ${sourceKey}, trying direct links:`, error);
-
-      try {
-        const linked = await getLinkedSourcesForShulchanArukhSeif(request.section, simanNum, seifNum);
-        const refs = sourceKey === 'tur' ? linked.turRefs : linked.beitYosefRefs;
-        if (refs.length > 0) {
-          const segments = await fetchSegmentsFromRefs(request, sourceKey, refs);
-          const syntheticData = responseWithSegments({
-            ref: refs[0],
-            he: [],
-            segments: [],
-            en: [],
-            direction: 'rtl',
-          }, segments);
-
-          return {
-            sourceKey,
-            tref: syntheticData.ref,
-            data: syntheticData,
-            fetchMode: 'linked-passages',
-          };
-        }
-      } catch (linksError) {
-        console.warn(`[Action] Direct links fallback failed for ${sourceKey}:`, linksError);
-      }
+    } catch (linksError) {
+      console.warn(`[Action] Direct links fallback failed for ${sourceKey}:`, linksError);
     }
   }
 
@@ -604,6 +761,7 @@ async function processSourceChunks(
   userId: string,
   guideId: string,
   companionText: string | undefined,
+  passagesOnlyMode: boolean,
   onChunkDone?: () => void,
 ): Promise<{ chunks: ProcessedChunk[]; cacheHits: number; cancelled: boolean }> {
   const processed: ProcessedChunk[] = [];
@@ -619,20 +777,41 @@ async function processSourceChunks(
     }
 
     const rawHash = createHash('sha256').update(chunk.text).digest('hex');
+    const shouldBypassLlm = passagesOnlyMode && sourceKey === 'torah_ohr';
+    let result: {
+      explanation: string;
+      modelUsed: string;
+      cacheHit: boolean;
+      validated: boolean;
+    };
 
-    const result = await explainTalmudSegment({
-      currentSegment: chunk.text,
-      previousSegments: previousSegment ? [previousSegment] : [],
-      previousExplanations: previousExplanation ? [previousExplanation] : [],
-      modelName,
-      normalizedTref: tref,
-      chunkOrder: i,
-      rawHash,
-      sourceKey,
-      companionText: sourceKey === 'shulchan_arukh' ? companionText : undefined,
-    });
-
-    if (result.cacheHit) cacheHits += 1;
+    if (shouldBypassLlm) {
+      result = {
+        explanation: chunk.text,
+        modelUsed: 'passages-only',
+        cacheHit: true,
+        validated: true,
+      };
+    } else {
+      const llmResult = await explainTalmudSegment({
+        currentSegment: chunk.text,
+        previousSegments: previousSegment ? [previousSegment] : [],
+        previousExplanations: previousExplanation ? [previousExplanation] : [],
+        modelName,
+        normalizedTref: chunk.ref || tref,
+        chunkOrder: i,
+        rawHash,
+        sourceKey,
+        companionText: sourceKey === 'shulchan_arukh' ? companionText : undefined,
+      });
+      if (llmResult.cacheHit) cacheHits += 1;
+      result = {
+        explanation: llmResult.explanation,
+        modelUsed: llmResult.modelUsed,
+        cacheHit: llmResult.cacheHit,
+        validated: llmResult.validated,
+      };
+    }
 
     processed.push({
       id: `${sourceKey}-${i}`,
@@ -761,9 +940,12 @@ export async function generateMultiSourceStudyGuide(
       }
 
       const allChunks = chunkStructuredText(segments, sourceKey);
-      const limited = allChunks.slice(0, MAX_CHUNKS_PER_SOURCE);
-      if (allChunks.length > MAX_CHUNKS_PER_SOURCE) {
-        console.warn(`[Action] ${sourceKey}: ${allChunks.length} chunks, limiting to ${MAX_CHUNKS_PER_SOURCE}.`);
+      const sourceChunkLimit = getChunkLimitForSource(sourceKey);
+      const limited = Number.isFinite(sourceChunkLimit)
+        ? allChunks.slice(0, sourceChunkLimit)
+        : allChunks;
+      if (allChunks.length > limited.length) {
+        console.warn(`[Action] ${sourceKey}: ${allChunks.length} chunks, limiting to ${limited.length}.`);
       }
       if (fetchMode === 'linked-passages') {
         console.info(`[Action] ${sourceKey}: using linked passages (${segments.length} structured segments).`);
@@ -812,6 +994,7 @@ export async function generateMultiSourceStudyGuide(
           userId,
           guideId,
           companionText,
+          !!request.torahOhrPassagesOnly,
           reportProgress,
         );
 
@@ -865,11 +1048,17 @@ export async function generateMultiSourceStudyGuide(
       await guideRef.update({ progressPhase: 'summary' });
     } catch { /* ignore */ }
 
-    const summaryResult = await summarizeTalmudStudyGuide({
-      studyGuideText: allExplanations,
-      modelName: modelToUse,
-      sources: request.sources,
-    });
+    const summaryResult = (request.torahOhrPassagesOnly && request.sources.length === 1 && request.sources[0] === 'torah_ohr')
+      ? {
+        summary: `תצוגת כל קטעי הפרשה ${request.siman} מתוך תורה אור (ללא ביאור AI).`,
+        modelUsed: 'passages-only',
+        validated: true,
+      }
+      : await summarizeTalmudStudyGuide({
+        studyGuideText: allExplanations,
+        modelName: modelToUse,
+        sources: request.sources,
+      });
 
     // 6. Log metrics
     const duration = Date.now() - startTime;
@@ -902,6 +1091,12 @@ export async function generateMultiSourceStudyGuide(
         console.warn('[Action-Cache] Failed to save canonical guide:', cacheSaveError);
         await markCanonicalFailed(canonicalCacheKey, 'cache_write_failed');
       }
+    }
+
+    try {
+      await persistGuideResultForUser(userId, guideId, finalGuideData);
+    } catch (userPersistError) {
+      console.warn('[Action] Failed to persist user guide result on server:', userPersistError);
     }
 
     return {

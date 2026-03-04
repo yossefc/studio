@@ -7,11 +7,12 @@ const SEFARIA_SECTION_MAP: Record<string, string> = {
     'Yoreh Deah': 'Shulchan Arukh, Yoreh Deah',
     'Even HaEzer': 'Shulchan Arukh, Even HaEzer',
     'Choshen Mishpat': 'Shulchan Arukh, Choshen Mishpat',
+    'Torah Ohr': 'Torah Ohr',
 };
 
 export interface SimanOption {
-    value: number;
-    label: string; // Hebrew letter representation
+    value: number | string;
+    label: string; // Hebrew letter representation or Parasha name
 }
 
 export interface SeifOption {
@@ -65,6 +66,9 @@ export async function getSeifCount(section: string, siman: number): Promise<numb
  * Returns an array of siman options {value, label} for the dropdown.
  */
 export async function getSimanOptions(section: string): Promise<SimanOption[]> {
+    if (section === 'Torah Ohr') {
+        return getTorahOhrParashot();
+    }
     const count = await getSimanCount(section);
     const options: SimanOption[] = [];
     for (let i = 1; i <= count; i++) {
@@ -76,11 +80,77 @@ export async function getSimanOptions(section: string): Promise<SimanOption[]> {
 /**
  * Returns an array of seif options {value, label} for the dropdown.
  */
-export async function getSeifOptions(section: string, siman: number): Promise<SeifOption[]> {
-    const count = await getSeifCount(section, siman);
+export async function getSeifOptions(section: string, siman: number | string): Promise<SeifOption[]> {
+    if (section === 'Torah Ohr') {
+        const count = await getTorahOhrMaamarCount(siman as string);
+        const options: SeifOption[] = [];
+        for (let i = 1; i <= count; i++) {
+            options.push({ value: i, label: i.toString() }); // Maamarim are usually numbered
+        }
+        return options;
+    }
+    const count = await getSeifCount(section, siman as number);
     const options: SeifOption[] = [];
     for (let i = 1; i <= count; i++) {
         options.push({ value: i, label: numberToHebrew(i) });
     }
     return options;
+}
+
+/**
+ * Fetches the Parashot nodes for Torah Ohr.
+ */
+async function getTorahOhrParashot(): Promise<SimanOption[]> {
+    const url = `https://www.sefaria.org/api/v2/index/Torah_Ohr`;
+    const response = await fetch(url, { next: { revalidate: 86400 } });
+    if (!response.ok) return [];
+
+    const data = await response.json();
+    const nodes = data?.schema?.nodes || [];
+
+    // Some books start directly, some have an intro or supplements. Filter to just Parashot.
+    const options: SimanOption[] = [];
+    const seenTitles = new Set<string>();
+
+    // Torah Ohr has two main divisions: "Bereshit" and "Shemot".
+    // Wait, let's explore all depth-1 nodes usually corresponding to Parashot.
+    const flattenNodes = (n: any) => {
+        if (n.nodeType === 'JaggedArrayNode' || !n.nodes) {
+            const heTitle = n.heTitle || n.titles?.find((t: any) => t.lang === 'he' && t.primary)?.text || n.titles?.find((t: any) => t.lang === 'he')?.text;
+            const enTitle = n.title || n.titles?.find((t: any) => t.lang === 'en' && t.primary)?.text || n.titles?.find((t: any) => t.lang === 'en')?.text;
+            if (heTitle && enTitle && !enTitle.toLowerCase().includes('introduction')) {
+                if (!seenTitles.has(enTitle)) {
+                    seenTitles.add(enTitle);
+                    options.push({ value: enTitle, label: heTitle });
+                }
+            }
+        } else if (n.nodes) {
+            n.nodes.forEach(flattenNodes);
+        }
+    };
+
+    nodes.forEach(flattenNodes);
+    return options;
+}
+
+/**
+ * Fetches the number of Maamarim in a specific Parasha in Torah Ohr.
+ */
+async function getTorahOhrMaamarCount(parashaEn: string | number): Promise<number> {
+    const parashaSafe = String(parashaEn).replace(/ /g, '_');
+    const url = `https://www.sefaria.org/api/v3/texts/Torah_Ohr,_${encodeURIComponent(parashaSafe)}?lang=he&context=0`;
+    const response = await fetch(url, { next: { revalidate: 86400 } });
+    if (!response.ok) return 0;
+
+    const data = await response.json();
+    const versions = data?.versions;
+    if (Array.isArray(versions)) {
+        const heVersion = versions.find((v: any) => v.language === 'he');
+        if (heVersion?.text && Array.isArray(heVersion.text)) {
+            // Depending on the structure, it might be an array of Maamarim or deeper
+            // If the Parasha is a 2D array, length is number of Maamarim.
+            return heVersion.text.length;
+        }
+    }
+    return 1; // Default to at least 1 if we can't parse
 }

@@ -11,12 +11,14 @@ import { FieldValue } from 'firebase-admin/firestore';
 import { getAdminDb } from '@/server/firebase-admin';
 import { HEBREW_RATIO_THRESHOLD } from '@/lib/constants';
 
-const PROMPT_VERSION = 'v3.4-rabbanut';
+const PROMPT_VERSION = 'v3.5-rabbanut';
 
 const SOURCE_LABELS: Record<string, string> = {
   tur: 'טור',
   beit_yosef: 'בית יוסף',
   shulchan_arukh: 'שולחן ערוך',
+  mishnah_berurah: 'משנה ברורה',
+  torah_ohr: 'תורה אור',
 };
 
 const TalmudAIChatbotExplanationInputSchema = z.object({
@@ -27,7 +29,7 @@ const TalmudAIChatbotExplanationInputSchema = z.object({
   normalizedTref: z.string().describe('The normalized Sefaria reference.'),
   chunkOrder: z.number().describe('The sequential order of this chunk.'),
   rawHash: z.string().describe('A hash of the current segment text.'),
-  sourceKey: z.string().default('shulchan_arukh').describe('The source type: tur, beit_yosef, shulchan_arukh.'),
+  sourceKey: z.string().default('shulchan_arukh').describe('The source type: tur, beit_yosef, shulchan_arukh, torah_ohr.'),
   companionText: z.string().optional().describe('Mishnah Berurah text to integrate alongside SA explanation.'),
 });
 
@@ -53,6 +55,42 @@ function validateHebrewOutput(text: string): boolean {
   return hebrewChars.length / Math.max(text.length, 1) >= HEBREW_RATIO_THRESHOLD;
 }
 
+function normalizeForRewriteCheck(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/[\u0591-\u05C7]/g, '') // strip niqqud/cantillation
+    .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function isLikelySourceRewrite(source: string, output: string): boolean {
+  const src = normalizeForRewriteCheck(source);
+  const out = normalizeForRewriteCheck(output);
+
+  if (!src || !out || out.length < 120) {
+    return false;
+  }
+
+  const srcTokens = src.split(' ').filter(token => token.length > 1);
+  const outTokens = out.split(' ').filter(token => token.length > 1);
+  if (outTokens.length < 24) {
+    return false;
+  }
+
+  const srcSet = new Set(srcTokens);
+  let overlapCount = 0;
+  for (const token of outTokens) {
+    if (srcSet.has(token)) overlapCount += 1;
+  }
+
+  const overlapRatio = overlapCount / outTokens.length;
+  const startsWithSourcePrefix = src.startsWith(out.slice(0, 80));
+  const sourceContainsOpening = src.includes(out.slice(0, 100));
+
+  return overlapRatio > 0.82 || startsWithSourcePrefix || sourceContainsOpening;
+}
+
 /* ---- Tref → Firestore path ---- */
 
 function parseTrefForPath(normalizedTref: string): { sectionKey: string; siman: string; seif: string } {
@@ -67,6 +105,8 @@ function parseTrefForPath(normalizedTref: string): { sectionKey: string; siman: 
     sectionKey = 'even_haezer';
   } else if (lowerTref.includes('choshen mishpat')) {
     sectionKey = 'choshen_mishpat';
+  } else if (lowerTref.includes('torah ohr')) {
+    sectionKey = 'torah_ohr';
   } else {
     // Fallback if structured differently
     const matchFallback = lowerTref.match(/^(.+?)\s+\d+/);
@@ -77,11 +117,18 @@ function parseTrefForPath(normalizedTref: string): { sectionKey: string; siman: 
 
   let siman = '0';
   let seif = '0';
-  const match = normalizedTref.match(/(\d+)(?::(\d+))?[\s\w]*$/);
 
-  if (match) {
-    siman = match[1] || '0';
-    seif = match[2] || '0';
+  if (sectionKey === 'torah_ohr') {
+    const withoutPrefix = lowerTref.replace('torah ohr,', '').trim();
+    const parts = withoutPrefix.split(/\s+/);
+    siman = parts[0] ? parts[0].replace(/[^a-z0-9א-ת]+/g, '_') : 'unknown';
+    seif = parts[1] ? parts[1].replace(/[^a-z0-9א-ת]+/g, '_') : '0';
+  } else {
+    const match = normalizedTref.match(/(\d+)(?::(\d+))?[\s\w]*$/);
+    if (match) {
+      siman = match[1] || '0';
+      seif = match[2] || '0';
+    }
   }
 
   return { sectionKey, siman, seif };
@@ -195,28 +242,53 @@ export const talmudAIChatbotExplanationFlow = ai.defineFlow(
       ? `\nהוספה לבית יוסף: בסוף כל דעה כתוב שורת סיכום קצרה של אותה דעה. אם כמה דעות אומרות אותו עיקרון, קבץ אותן יחד תחת סיכום משותף.\n`
       : '';
 
-    const basePrompt = `אתה מסביר תורני מקצועי. הקהל הוא תלמיד המתכונן למבחן רבנות.
+    const manualInputAddition = /saisie manuelle|manual/i.test(input.normalizedTref)
+      ? `\nהטקסט הוזן ידנית. חובה לייצר ביאור פרשני אמיתי; אסור להחזיר נוסח דומה למקור או שכתוב שלו.\n`
+      : '';
+
+    let basePrompt = '';
+
+    if (input.sourceKey === 'torah_ohr') {
+      basePrompt = `אתה מומחה לתורת החסידות והקבלה, ומסביר תורני מקצועי. הקהל הוא תלמיד הלומד בספר "תורה אור" (לפי פרשיות ומאמרים).
 ענה בעברית בלבד.
 
-מטרתך היא מינימליזם מוחלט: להסביר *אך ורק* מה שבאמת דורש הסבר. אל תאריך במילים ואל תפרש טקסט שמובן מאליו!
+מטרתך היא לבאר את המאמר לעומק, לפשט את המושגים הקבליים והחסידיים, ולבנות הבנה רציפה של הרעיון הרוחני.
 
 כללים מחייבים:
-1. העתק את כל מילות המקור לפי הסדר, בלי לדלג על אף מילה. הדגש כל מילת מקור בפורמט **bold**.
-2. **התערבות מינימלית (חובה):** הוסף הסבר קצר (כהמשך ישיר של המשפט, ללא סוגריים) **אך ורק** בשלושת המקרים הבאים:
-   - **ארמית:** תרגם והסבר קטעים בארמית בעברית פשוטה.
-   - **מושגים מורכבים:** באר ביטויים קשים, נדירים או לא ברורים.
-   - **השלמת הקשר:** הוסף רקע קצרצר רק במקום שבו הטקסט חסר או לא מובן ללא ההקשר.
-   *אם המשפט המקורי מובן וברור בעברית - אל תוסיף לו אפילו מילה אחת של הסבר! פשוט העתק אותו מודגש והמשך הלאה.*
-3. פתח ראשי תיבות לידם, בלי סוגריים (לדוגמה: **מ"ב** משנה ברורה).
-4. כשמוזכר פוסק/דעה: ציין מפורש מי אומר, ומהיכן הוא (לדוגמה: **הרמב"ם** פוסק ש... כמובא ב**טור**).
-5. חוק עליון - ללא תוספות: אל תכתוב פתיח, סיום, הערות, או הקדמה (אסור לכתוב "בטח", "הנה"). תתחיל ישר עם הטקסט.
-6. אל תוסיף דעות או מקורות שלא מוזכרים בטקסט המקור.
+1. **העתקת המקור:** העתק את כל מילות המקור לפי הסדר, בלי לדלג על אף מילה. הדגש כל מילת מקור בפורמט **bold**.
+2. **הסבר חובה לכל משפט/רעיון:** אל תסתפק רק בהעתקת המילים! אחרי כל קטע קצר או רעיון, הוסף הסבר מפורט (כהמשך ישיר, ללא סוגריים) שמבאר את העומק החסידי הפנימי שמאחורי המילים. גם אם המילים עצמן בעברית פשוטה, הסבר את הנמשל, הכוונה הרוחנית, והקשר המושכל.
+3. **ביאור מושגים:** הסבר בפירוט כל מושג קבלי/חסידי (ספירות, עולמות, צמצום, כלים, אורות וכו') וכל מונח בארמית בתוך רצף הקריאה.
+4. **פתיחת ראשי תיבות:** פתח ראשי תיבות לידם, בלי סוגריים (נפוץ מאוד).
+5. **חוק עליון - ללא תוספות:** אסור בהחלט לכתוב פתיח, סיום, הערות מטא, או הקדמה (אסור לכתוב "להלן הביאור"). תתחיל ישר עם הטקסט.
 
-${beitYosefAddition}${contextPrompt}${companionSection}
+${contextPrompt}
 מקור להסבר (${sourceLabel}):
 ${input.currentSegment}
 
-ביאור מינימליסטי וממוקד:`;
+ביאור משולב:`;
+    } else {
+      basePrompt = `You are a professional halakhic explainer for Rabbanut students.
+Respond in Hebrew only.
+
+Goal: produce a true ביאור, not a rewrite of the source text.
+
+Mandatory rules:
+1) Do NOT copy the source sentence-by-sentence and do NOT return a light paraphrase of it.
+2) Do NOT quote more than 6 consecutive words from the source (except short technical terms).
+3) Explain each central point with substance:
+   - what the line means in plain language,
+   - the halakhic reasoning/principle behind it,
+   - the practical implication (הלכה למעשה).
+4) If there is a dispute, clearly separate opinions and state the practical outcome.
+5) Expand abbreviations and explain difficult/Aramaic terms.
+6) No intro, no summary outro, no meta-comments. Start directly with the explanation.
+7) Do not invent sources or claims not grounded in the given text.
+${manualInputAddition}${beitYosefAddition}${contextPrompt}${companionSection}
+Source to explain (${sourceLabel}):
+${input.currentSegment}
+
+Return only the explanation in Hebrew:`;
+    }
 
     const generated = await generateTextWithFallback({
       prompt: basePrompt,
@@ -227,6 +299,37 @@ ${input.currentSegment}
 
     let explanation = generated.text;
     let modelUsed = generated.modelUsed;
+    const shouldCheckRewrite = input.sourceKey !== 'torah_ohr';
+
+    if (shouldCheckRewrite && isLikelySourceRewrite(input.currentSegment, explanation)) {
+      const rewriteRepairPrompt = `The draft below is too close to the source and reads like a rewrite.
+Rewrite it as a real halakhic explanation in Hebrew.
+
+Rules:
+- Do not preserve the source sentence order.
+- Do not quote more than 6 consecutive words from the source.
+- Focus on explanation, reasoning, and practical implications.
+- No intro/outro/meta text.
+
+Source:
+${input.currentSegment}
+
+Draft to fix:
+${explanation}
+
+Return only the improved Hebrew explanation:`;
+
+      const rewritten = await generateTextWithFallback({
+        prompt: rewriteRepairPrompt,
+        preferredModel: modelUsed,
+        maxRetries: 2,
+        timeoutMs: 90_000,
+      });
+
+      explanation = rewritten.text;
+      modelUsed = rewritten.modelUsed;
+    }
+
     let validated = validateHebrewOutput(explanation);
 
     if (!validated) {
@@ -248,6 +351,10 @@ ${explanation}
       explanation = repaired.text;
       modelUsed = repaired.modelUsed;
       validated = validateHebrewOutput(explanation);
+    }
+
+    if (shouldCheckRewrite && isLikelySourceRewrite(input.currentSegment, explanation)) {
+      validated = false;
     }
 
     // --- Write to NEW rabanout structure ---

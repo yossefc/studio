@@ -8,6 +8,8 @@ export interface SeifRefMapping {
   turMode: 'linked-passages' | 'fallback-similarity' | 'none';
   byMode: 'linked-passages' | 'fallback-similarity' | 'none';
   confidence: number;
+  /** Pre-sliced Tur text for this seif (used when Tur is a single giant segment). */
+  turTextSlice?: string;
 }
 
 export interface SimanAlignment {
@@ -30,7 +32,8 @@ export interface SimanAlignment {
 
 const ALIGNMENTS_COLLECTION = 'alignments';
 const LOCK_TIMEOUT_MS = 5 * 60 * 1000;
-export const CURRENT_CACHE_VERSION = 2;
+// Bumped: giant-Tur uses direct BY links only; seifim without direct evidence stay empty.
+export const CURRENT_CACHE_VERSION = 12;
 
 export function generateSourceHash(payload: string): string {
   return createHash('sha256').update(payload).digest('hex');

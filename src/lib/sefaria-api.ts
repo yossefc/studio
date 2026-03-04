@@ -6,7 +6,7 @@
 import { hebrewToNumber } from '@/lib/hebrew-utils';
 import { chunkStructuredText } from '@/lib/chunker';
 
-export type SourceKey = 'tur' | 'beit_yosef' | 'shulchan_arukh' | 'mishnah_berurah';
+export type SourceKey = 'tur' | 'beit_yosef' | 'shulchan_arukh' | 'mishnah_berurah' | 'torah_ohr';
 export type FetchMode = 'exact-seif' | 'linked-passages' | 'full-siman';
 
 export interface SourceConfig {
@@ -57,10 +57,18 @@ export const SOURCE_CONFIGS: Record<SourceKey, SourceConfig> = {
     supportsSeif: true,
     onlyOrachChayim: true,
   },
+  torah_ohr: {
+    key: 'torah_ohr',
+    hebrewLabel: 'תורה אור',
+    sefariaPrefix: 'Torah Ohr',
+    includesSection: false,
+    supportsSeif: true,
+    onlyOrachChayim: false,
+  },
 };
 
 /** Canonical processing order for multi-source guides. */
-export const SOURCE_PROCESSING_ORDER: SourceKey[] = ['tur', 'beit_yosef', 'shulchan_arukh'];
+export const SOURCE_PROCESSING_ORDER: SourceKey[] = ['tur', 'beit_yosef', 'shulchan_arukh', 'torah_ohr'];
 
 export function resolveFetchMode(sourceKey: SourceKey): FetchMode {
   if (sourceKey === 'tur' || sourceKey === 'beit_yosef') {
@@ -90,6 +98,15 @@ export function buildSefariaRef(
   siman: string,
   seif?: string,
 ): string {
+  if (sourceKey === 'torah_ohr') {
+    const parasha = siman.trim();
+    let base = `Torah Ohr, ${parasha}`;
+    if (seif && seif.trim()) {
+      base += ` ${seif.trim()}`;
+    }
+    return base;
+  }
+
   const config = SOURCE_CONFIGS[sourceKey];
   const simanNum = hebrewToNumber(siman);
 
@@ -253,6 +270,30 @@ function refStartsWithAnyPrefix(ref: string, prefixes: string[]): boolean {
   return prefixes.some(prefix => normalizedRef.startsWith(normalizeForPrefixMatch(prefix)));
 }
 
+function firstNumericToken(ref: string): number | null {
+  const match = ref.match(/(\d+)/);
+  if (!match) return null;
+  const parsed = Number.parseInt(match[1], 10);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function refBelongsToSiman(ref: string, siman: number): boolean {
+  const firstNumber = firstNumericToken(ref);
+  return firstNumber === siman;
+}
+
+function numericRefSort(a: string, b: string): number {
+  const aNums = (a.match(/\d+/g) || []).map(n => Number.parseInt(n, 10));
+  const bNums = (b.match(/\d+/g) || []).map(n => Number.parseInt(n, 10));
+  const len = Math.max(aNums.length, bNums.length);
+  for (let i = 0; i < len; i++) {
+    const av = aNums[i] ?? -1;
+    const bv = bNums[i] ?? -1;
+    if (av !== bv) return av - bv;
+  }
+  return a.localeCompare(b);
+}
+
 export async function getLinkedSourcesForShulchanArukhSeif(
   section: string,
   siman: number,
@@ -283,11 +324,13 @@ export async function getLinkedSourcesForShulchanArukhSeif(
 
   const turRefs = [...allRefs]
     .filter(ref => refStartsWithAnyPrefix(ref, turPrefixes))
-    .sort();
+    .filter(ref => refBelongsToSiman(ref, siman))
+    .sort(numericRefSort);
 
   const beitYosefRefs = [...allRefs]
     .filter(ref => refStartsWithAnyPrefix(ref, beitYosefPrefixes))
-    .sort();
+    .filter(ref => refBelongsToSiman(ref, siman))
+    .sort(numericRefSort);
 
   return {
     shulchanArukhTref,
@@ -332,13 +375,95 @@ function getSegmentTopLevelIndex(segment: StructuredChunk, siman: number): numbe
   return extractTopLevelIndexFromRef(segment.ref, siman);
 }
 
+function markerTokens(text: string): string[] {
+  return cleanSegmentText(text)
+    .replace(/[\u0591-\u05C7]/g, '')
+    .replace(/[^\u05D0-\u05EA\s]/g, ' ')
+    .split(/\s+/)
+    .map(token => token.trim())
+    .filter(token => token.length >= 2);
+}
+
+function buildMarkerRegexes(text: string, maxWords = 8, minWords = 2): RegExp[] {
+  const tokens = markerTokens(text);
+  if (tokens.length < minWords) return [];
+
+  const starts = [0, 2, 4, 6, 8].filter(start => start < tokens.length);
+  const seen = new Set<string>();
+  const regexes: RegExp[] = [];
+
+  for (const start of starts) {
+    const upper = Math.min(maxWords, tokens.length - start);
+    for (let len = upper; len >= minWords; len--) {
+      const anchor = tokens.slice(start, start + len);
+      if (anchor.length < minWords) continue;
+      const pattern = anchor.join('[^\\u05D0-\\u05EA]+');
+      if (seen.has(pattern)) continue;
+      seen.add(pattern);
+      regexes.push(new RegExp(pattern));
+    }
+  }
+
+  return regexes;
+}
+
+function findMarkerIndexInText(
+  haystack: string,
+  markerText: string,
+  fromIndex = 0,
+  minWords = 2,
+): number | null {
+  const scoped = haystack.substring(Math.max(fromIndex, 0));
+  const regexes = buildMarkerRegexes(markerText, 8, minWords);
+  let bestIndex: number | null = null;
+
+  for (const regex of regexes) {
+    const match = scoped.match(regex);
+    if (match && match.index !== undefined) {
+      const absoluteIndex = Math.max(fromIndex, 0) + match.index;
+      if (bestIndex === null || absoluteIndex < bestIndex) {
+        bestIndex = absoluteIndex;
+      }
+    }
+  }
+
+  return bestIndex;
+}
+
+async function getShulchanArukhMaxSeif(section: string, siman: number): Promise<number> {
+  const saSimanRef = `Shulchan Arukh, ${section} ${siman}`;
+  const saData = await fetchSefariaText(saSimanRef, 'he');
+  const indices = saData.segments
+    .map(segment => getSegmentTopLevelIndex(segment, siman))
+    .filter((index): index is number => typeof index === 'number' && index > 0);
+
+  if (indices.length === 0) {
+    return 0;
+  }
+
+  return Math.max(...indices);
+}
+
+async function getBeitYosefTopLevelIndices(section: string, siman: number): Promise<number[]> {
+  const bySimanRef = `Beit Yosef, ${section} ${siman}`;
+  const byData = await fetchSefariaText(bySimanRef, 'he');
+
+  const indices = byData.segments
+    .map(segment => getSegmentTopLevelIndex(segment, siman))
+    .filter((index): index is number => typeof index === 'number' && index > 0)
+    .sort((a, b) => a - b);
+
+  return [...new Set(indices)];
+}
+
 /**
  * Extrait le sous-ensemble du Tur correspondant à un Seif donné,
  * en se basant sur les liens du Beit Yosef comme repères de début et de fin.
  * 
  * Règle métier :
  * - Début : Index du premier Beit Yosef lié au Seif N.
- * - Fin : Index (exclu) du premier Beit Yosef lié au Seif N+1.
+ * - Fin : Index (exclu) du premier Beit Yosef lié au premier Seif > N
+ *         qui possède un lien BY (N+1, puis N+2, etc.).
  */
 export async function getTurSegmentsForSeif(
   section: string,
@@ -352,47 +477,96 @@ export async function getTurSegmentsForSeif(
   }
 
   const sectionName = normalizeTref(section);
+  let byTopLevelIndicesCache: number[] | null = null;
 
-  // 1. Chercher la limite de début (Beit Yosef lié au Seif N)
+  const getByTopLevelIndicesSafe = async (): Promise<number[]> => {
+    if (byTopLevelIndicesCache) return byTopLevelIndicesCache;
+    try {
+      byTopLevelIndicesCache = await getBeitYosefTopLevelIndices(sectionName, siman);
+    } catch {
+      byTopLevelIndicesCache = [];
+    }
+    return byTopLevelIndicesCache;
+  };
+
+  // 1) Start boundary = first Beit Yosef segment linked to SA seif N.
   let startIndex: number | null = providedStartIndex ?? null;
-  let seekStartSeif = seif;
-
   if (!startIndex) {
-    while (seekStartSeif >= 1) {
-      try {
-        const links = await getLinkedSourcesForShulchanArukhSeif(sectionName, siman, seekStartSeif);
-        startIndex = getFirstBeitYosefBoundaryIndex(links, siman);
-        if (startIndex) break;
-      } catch {
-        // Ignorer les erreurs et continuer la recherche en arrière
-      }
-      seekStartSeif--;
+    try {
+      const currentLinks = await getLinkedSourcesForShulchanArukhSeif(sectionName, siman, seif);
+      startIndex = getFirstBeitYosefBoundaryIndex(currentLinks, siman);
+    } catch {
+      startIndex = null;
     }
   }
 
-  // Si aucun Beit Yosef avant, on prend depuis le début du Siman
   if (!startIndex) {
+    // Fallback A: search backward seif-by-seif for nearest prior BY link boundary.
+    for (let prevSeif = seif - 1; prevSeif >= 1; prevSeif--) {
+      try {
+        const prevLinks = await getLinkedSourcesForShulchanArukhSeif(sectionName, siman, prevSeif);
+        const candidateBoundary = getFirstBeitYosefBoundaryIndex(prevLinks, siman);
+        if (candidateBoundary) {
+          startIndex = candidateBoundary;
+          break;
+        }
+      } catch {
+        // keep searching
+      }
+    }
+  }
+
+  if (!startIndex) {
+    // Fallback B: use Beit Yosef siman structure (exact seif if exists, else nearest previous).
+    const byIndices = await getByTopLevelIndicesSafe();
+    if (byIndices.includes(seif)) {
+      startIndex = seif;
+    } else {
+      const prevCandidates = byIndices.filter(index => index < seif);
+      startIndex = prevCandidates.length > 0 ? prevCandidates[prevCandidates.length - 1] : null;
+    }
+  }
+
+  if (!startIndex) {
+    // Final fallback: start from beginning of siman.
     startIndex = 1;
   }
 
-  // 2. Chercher la limite de fin (Beit Yosef lié au Seif N+1)
+  // 2) End boundary = first Beit Yosef segment linked to SA seif > N.
+  // If N+1 has no BY link, continue with N+2, N+3, ... until end of siman.
   let endIndexExclusive: number | null = providedEndIndexExclusive ?? null;
-  let seekEndSeif = seif + 1;
-  const maxEndSeek = seif + 5; // Limiter la recherche pour éviter les boucles infinies
-
   if (!endIndexExclusive) {
-    while (seekEndSeif <= maxEndSeek) {
+    let maxSeif = 0;
+    try {
+      maxSeif = await getShulchanArukhMaxSeif(sectionName, siman);
+    } catch {
+      maxSeif = 0;
+    }
+
+    const upperBound = Math.max(maxSeif, seif + 1);
+    for (let nextSeif = seif + 1; nextSeif <= upperBound; nextSeif++) {
       try {
-        const nextLinks = await getLinkedSourcesForShulchanArukhSeif(sectionName, siman, seekEndSeif);
-        endIndexExclusive = getFirstBeitYosefBoundaryIndex(nextLinks, siman);
-        if (endIndexExclusive) break;
+        const nextLinks = await getLinkedSourcesForShulchanArukhSeif(sectionName, siman, nextSeif);
+        const candidateBoundary = getFirstBeitYosefBoundaryIndex(nextLinks, siman);
+        if (candidateBoundary && candidateBoundary > startIndex) {
+          endIndexExclusive = candidateBoundary;
+          break;
+        }
       } catch {
-        // Cas typique où l'on a atteint la fin du Siman
-        break;
+        // Keep searching forward.
       }
-      seekEndSeif++;
     }
   }
+
+  if (!endIndexExclusive) {
+    // Fallback C: use BY siman structure for the next boundary after chosen start.
+    const byIndices = await getByTopLevelIndicesSafe();
+    endIndexExclusive = byIndices.find(index => index > startIndex) ?? null;
+  }
+
+  console.info(
+    `[Tur-Boundary] ${sectionName} ${siman}:${seif} boundaries => startIndex=${startIndex}, endIndexExclusive=${endIndexExclusive ?? 'end-of-siman'}`,
+  );
 
   // 3. Récupérer le JaggedArray du Tur
   const turSimanRef = `Tur, ${sectionName} ${siman}`;
@@ -408,11 +582,10 @@ export async function getTurSegmentsForSeif(
     throw new Error(`[Tur-Boundary] Le siman du Tur est vide: ${turSimanRef}`);
   }
 
-  // 4. Découper (par frontières d'index ou textuelles)
+  // 4) Slice Tur by index boundaries.
+  // If Sefaria returns one giant Tur segment, use textual markers based on BY boundaries.
   let selected: StructuredChunk[] = [];
 
-  // OPTION 2 : HEURISTIQUE TEXTUELLE
-  // Si le Tur est mal découpé (un seul gros bloc pour tout le siman, ex: OC 24)
   if (turData.segments.length === 1) {
     const giantText = turData.segments[0].text;
     const bySimanRef = `Beit Yosef, ${sectionName} ${siman}`;
@@ -426,52 +599,110 @@ export async function getTurSegmentsForSeif(
     let cutStartIndex = 0;
     let cutEndIndex = giantText.length;
 
-    // Helper to generate a robust regex from a text snippet
-    // Takes the first ~4 words, escapes them, and joins with flexible whitespace/punctuation matchers
-    const buildRegexMarker = (text: string, numWords = 4) => {
-      const words = cleanSegmentText(text)
-        .replace(/[^\u05D0-\u05EA]/g, ' ') // Keep only Hebrew letters
-        .split(/\s+/)
-        .filter(w => w.length > 0)
-        .slice(0, numWords);
-
-      if (words.length === 0) return null;
-      // Allow any non-hebrew characters (spaces, punctuation) between the anchor words
-      const pattern = words.join('[^\\u05D0-\\u05EA]+');
-      return new RegExp(pattern);
-    };
-
     if (byData && byData.segments.length > 0) {
-      if (startIndex) {
-        const byStartSeg = byData.segments.find(s => getSegmentTopLevelIndex(s, siman) === startIndex);
-        if (byStartSeg) {
-          const regexStart = buildRegexMarker(byStartSeg.text);
-          if (regexStart) {
-            const match = giantText.match(regexStart);
-            if (match && match.index !== undefined) {
-              cutStartIndex = match.index;
-            }
-          }
-        }
+      const bySegmentsByIndex = new Map<number, StructuredChunk[]>();
+      for (const seg of byData.segments) {
+        const idx = getSegmentTopLevelIndex(seg, siman);
+        if (!idx) continue;
+        const bucket = bySegmentsByIndex.get(idx) ?? [];
+        bucket.push(seg);
+        bySegmentsByIndex.set(idx, bucket);
       }
 
-      if (endIndexExclusive) {
-        const byEndSeg = byData.segments.find(s => getSegmentTopLevelIndex(s, siman) === endIndexExclusive);
-        if (byEndSeg) {
-          const regexEnd = buildRegexMarker(byEndSeg.text);
-          if (regexEnd) {
-            const subGiant = giantText.substring(cutStartIndex);
-            const match = subGiant.match(regexEnd);
-            if (match && match.index !== undefined && match.index > 0) {
-              cutEndIndex = cutStartIndex + match.index;
+      if (startIndex && startIndex > 1) {
+        const startCandidates = bySegmentsByIndex.get(startIndex) ?? [];
+        let bestStart: number | null = null;
+
+        const startMinWordLevels = [6, 5, 4, 3, 2];
+        for (const minWords of startMinWordLevels) {
+          let levelBest: number | null = null;
+
+          for (const candidate of startCandidates) {
+            const markerPos = findMarkerIndexInText(giantText, candidate.text, 0, minWords);
+            if (markerPos === null) continue;
+            if (levelBest === null || markerPos < levelBest) {
+              levelBest = markerPos;
             }
           }
+
+          if (levelBest !== null) {
+            bestStart = levelBest;
+            break;
+          }
+        }
+
+        if (bestStart !== null) {
+          cutStartIndex = bestStart;
+        }
+      }
+      // startIndex === 1: first seif always starts from the beginning of the Tur text (cutStartIndex remains 0)
+
+      if (endIndexExclusive) {
+        const endCandidates = bySegmentsByIndex.get(endIndexExclusive) ?? [];
+        let bestEnd: number | null = null;
+
+        const minSpanWordsStrict = 18;
+        const minSpanWordsRelaxed = 10;
+
+        const tryFindEnd = (levels: number[], minSpanWords: number): number | null => {
+          for (const minWords of levels) {
+            let levelBest: number | null = null;
+
+            for (const candidate of endCandidates) {
+              const markerPos = findMarkerIndexInText(giantText, candidate.text, cutStartIndex + 1, minWords);
+              if (markerPos === null || markerPos <= cutStartIndex) continue;
+
+              const spanWords = markerTokens(giantText.substring(cutStartIndex, markerPos)).length;
+              if (spanWords < minSpanWords) continue;
+
+              if (levelBest === null || markerPos < levelBest) {
+                levelBest = markerPos;
+              }
+            }
+
+            if (levelBest !== null) {
+              return levelBest;
+            }
+          }
+
+          return null;
+        };
+
+        bestEnd = tryFindEnd([6, 5, 4, 3, 2], minSpanWordsStrict);
+        if (bestEnd === null) {
+          bestEnd = tryFindEnd([8, 7, 6, 5], minSpanWordsRelaxed);
+        }
+
+        if (bestEnd !== null) {
+          cutEndIndex = bestEnd;
         }
       }
     }
 
+    if (startIndex > 1 && cutStartIndex === 0) {
+      console.warn(
+        `[Tur-Boundary] giant marker start not found for ${sectionName} ${siman}:${seif} (startIndex=${startIndex})`,
+      );
+    }
+    if (endIndexExclusive && cutEndIndex === giantText.length) {
+      console.warn(
+        `[Tur-Boundary] giant marker end not found for ${sectionName} ${siman}:${seif} (endIndexExclusive=${endIndexExclusive})`,
+      );
+    }
+
     const extractedText = giantText.substring(cutStartIndex, cutEndIndex).trim();
     if (extractedText) {
+      const extractedWordCount = extractedText.split(/\s+/).filter(Boolean).length;
+      if (endIndexExclusive && extractedWordCount < 18) {
+        console.warn(
+          `[Tur-Boundary] unusually short giant-cut for ${sectionName} ${siman}:${seif} (${extractedWordCount} words)`,
+        );
+      }
+      const startPreview = extractedText.split(/\s+/).slice(0, 10).join(' ');
+      const endPreview = extractedText.split(/\s+/).slice(-10).join(' ');
+      console.info(
+        `[Tur-Boundary] ${sectionName} ${siman}:${seif} giant-cut => startChar=${cutStartIndex}, endChar=${cutEndIndex}, words=${extractedWordCount}, start="${startPreview}", end="${endPreview}"`,
+      );
       selected.push({
         ref: `${turSimanRef} [Extrait Seif ${seif}]`,
         text: extractedText
@@ -479,7 +710,6 @@ export async function getTurSegmentsForSeif(
     }
 
   } else {
-    // Cas classique par frontières d'index (le Tur est bien découpé)
     const boundedByIndex = turData.segments.filter((segment) => {
       const idx = getSegmentTopLevelIndex(segment, siman);
       if (!idx) return false;
@@ -497,10 +727,10 @@ export async function getTurSegmentsForSeif(
   }
 
   if (selected.length === 0) {
-    return []; // Retourne un tableau vide au lieu de planter si rien n'est trouvé
+    return [];
   }
 
-  // 5. Chunking technique (si > 180 mots) en préservant le 'ref'
+  // 5) Technical chunking (>180 words) while preserving parent `ref`.
   const chunked = chunkStructuredText(
     selected.map(segment => ({ ref: segment.ref, path: segment.path, text: segment.text })),
     'tur',
@@ -543,6 +773,7 @@ export function normalizeTref(tref: string): string {
     'מועד קטן': 'Moed Katan',
     'חגיגה': 'Chagigah',
     'טור': 'Tur',
+    'תורה אור': 'Torah Ohr',
   };
 
   const sortedKeys = Object.keys(mappings).sort((a, b) => b.length - a.length);

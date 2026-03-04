@@ -39,7 +39,11 @@ const SOURCE_PALETTE: Record<SourceResult['sourceKey'], { accent: typeof COLOR_P
   },
   mishnah_berurah: {
     accent: { red: 11 / 255, green: 124 / 255, blue: 88 / 255 },         // #0B7C58
-    softBg: { red: 229 / 255, green: 247 / 255, blue: 240 / 255 },       // #E5F7F0
+    softBg: { red: 229 / 255, green: 240 / 255, blue: 247 / 255 },       // #E5F7F0
+  },
+  torah_ohr: {
+    accent: { red: 138 / 255, green: 90 / 255, blue: 25 / 255 },         // #8A5A19 
+    softBg: { red: 242 / 255, green: 229 / 255, blue: 213 / 255 },       // #F2E5D5
   },
 };
 
@@ -227,11 +231,13 @@ export async function createStudyGuideDoc(
       const compactRaw = normalizeForDoc(chunk.rawText, true);
       const compactExplanation = normalizeForDoc(chunk.explanation);
 
-      // Source text with label
-      const sourceStart = cursor;
-      appendStyled('מקור: ', 'sourceLabel', sr.sourceKey);
-      appendPlain(`${compactRaw}\n`);
-      sourceParagraphs.push({ start: sourceStart, end: cursor, sourceKey: sr.sourceKey });
+      // Source text with label (skip for Torah Ohr to create seamless reading)
+      if (sr.sourceKey !== 'torah_ohr') {
+        const sourceStart = cursor;
+        appendStyled('מקור: ', 'sourceLabel', sr.sourceKey);
+        appendPlain(`${compactRaw}\n`);
+        sourceParagraphs.push({ start: sourceStart, end: cursor, sourceKey: sr.sourceKey });
+      }
 
       // Explanation
       appendBoldAware(`${compactExplanation}\n`, sr.sourceKey);

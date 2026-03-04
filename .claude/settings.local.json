@@ -23,7 +23,8 @@
       "Bash(powershell -Command:*)",
       "Bash(node -e:*)",
       "WebFetch(domain:alhatorah.org)",
-      "WebFetch(domain:jewishaction.com)"
+      "WebFetch(domain:jewishaction.com)",
+      "Bash(python -c:*)"
     ]
   }
 }

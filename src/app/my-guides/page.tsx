@@ -14,6 +14,7 @@ import {
   collection, query, orderBy, getDocs,
 } from 'firebase/firestore';
 import { useMemo, useState, useCallback } from 'react';
+import { cn } from '@/lib/utils';
 import { Input } from '@/components/ui/input';
 import { hebrewToNumber, numberToHebrew } from '@/lib/hebrew-utils';
 import type { SourceKey } from '@/lib/sefaria-api';
@@ -197,28 +198,53 @@ const SOURCE_LABELS: Record<string, string> = {
   mishnah_berurah: 'משנה ברורה',
 };
 
-const SOURCE_THEME: Record<string, { headerClass: string; sourceCardClass: string; accentClass: string }> = {
+const SOURCE_THEME: Record<string, {
+  headerClass: string;
+  sourceCardClass: string;
+  accentClass: string;
+  borderAccent: string;
+  explanationCardClass: string;
+  panelClass: string;
+}> = {
   tur: {
-    headerClass: 'text-amber-700 border-amber-300',
-    sourceCardClass: 'bg-amber-50 border border-amber-200 text-amber-900',
-    accentClass: 'text-amber-700',
+    headerClass: 'text-[#7A3E12]',
+    sourceCardClass: 'text-[#2E2620]',
+    accentClass: 'text-[#7A3E12]',
+    borderAccent: '',
+    explanationCardClass: '',
+    panelClass: '',
   },
   beit_yosef: {
-    headerClass: 'text-teal-700 border-teal-300',
-    sourceCardClass: 'bg-teal-50 border border-teal-200 text-teal-900',
-    accentClass: 'text-teal-700',
+    headerClass: 'text-[#0F766E]',
+    sourceCardClass: 'text-[#1D2B2A]',
+    accentClass: 'text-[#0F766E]',
+    borderAccent: '',
+    explanationCardClass: '',
+    panelClass: '',
   },
   shulchan_arukh: {
-    headerClass: 'text-blue-700 border-blue-300',
-    sourceCardClass: 'bg-blue-50 border border-blue-200 text-blue-900',
-    accentClass: 'text-blue-700',
+    headerClass: 'text-[#1D4F73]',
+    sourceCardClass: 'text-[#1D2731]',
+    accentClass: 'text-[#1D4F73]',
+    borderAccent: '',
+    explanationCardClass: '',
+    panelClass: '',
   },
   mishnah_berurah: {
-    headerClass: 'text-emerald-700 border-emerald-300',
-    sourceCardClass: 'bg-emerald-50 border border-emerald-200 text-emerald-900',
-    accentClass: 'text-emerald-700',
+    headerClass: 'text-[#3F6212]',
+    sourceCardClass: 'text-[#2E3524]',
+    accentClass: 'text-[#3F6212]',
+    borderAccent: '',
+    explanationCardClass: '',
+    panelClass: '',
   },
 };
+
+function renderAccentText(text: string, accentClass: string) {
+  return text.split('**').map((part, i) =>
+    i % 2 === 1 ? <strong key={i} className={cn('font-bold', accentClass)}>{part}</strong> : part
+  );
+}
 
 /* ------------------------------------------------------------------ */
 /*  Page component                                                    */
@@ -485,25 +511,25 @@ export default function MyGuidesPage() {
                                               לא נמצאו קטעים שמורים עבור מדריך זה.
                                             </div>
                                           ) : (
-                                            <div className="p-5 space-y-6 max-h-[60vh] overflow-y-auto print:max-h-none print:overflow-visible print:absolute print:inset-0 print:bg-white print:z-50 print:p-8">
+                                            <div className="p-5 md:p-6 space-y-6 max-h-[65vh] overflow-y-auto bg-gradient-to-b from-[#F8F4EC] to-[#F3EEE4] print:max-h-none print:overflow-visible print:absolute print:inset-0 print:bg-white print:z-50 print:p-8">
                                               {/* Close button & Print button */}
                                               <div className="flex items-center justify-between print:hidden">
-                                                <h3 className="text-lg font-bold text-primary">
+                                                <h3 className="text-lg font-bold text-[#6A3424]">
                                                   ביאור — {activeGuide?.tref}
                                                 </h3>
                                                 <div className="flex items-center gap-2">
                                                   <button
                                                     onClick={() => window.print()}
-                                                    className="p-1.5 rounded-lg hover:bg-muted/50 transition-colors text-muted-foreground hover:text-primary"
+                                                    className="p-1.5 rounded-lg hover:bg-[#EDE5D8] transition-colors text-[#7B756A] hover:text-[#6A3424]"
                                                     title="הדפס ביאור"
                                                   >
                                                     <Printer className="w-4 h-4" />
                                                   </button>
                                                   <button
                                                     onClick={() => { setActiveGuideId(null); setActiveGuide(null); setChunks([]); }}
-                                                    className="p-1.5 rounded-lg hover:bg-muted/50 transition-colors"
+                                                    className="p-1.5 rounded-lg hover:bg-[#EDE5D8] transition-colors"
                                                   >
-                                                    <X className="w-4 h-4 text-muted-foreground" />
+                                                    <X className="w-4 h-4 text-[#7B756A]" />
                                                   </button>
                                                 </div>
                                               </div>
@@ -520,29 +546,38 @@ export default function MyGuidesPage() {
                                                 })
                                                 .map(([sourceKey, sourceChunks]) => {
                                                   const theme = SOURCE_THEME[sourceKey] || SOURCE_THEME.shulchan_arukh;
+                                                  const isBeitYosef = sourceKey === 'beit_yosef';
                                                   return (
-                                                    <div key={sourceKey} className="space-y-6 print:hidden">
-                                                      <h2 className={`text-2xl font-bold border-b pb-2 ${theme.headerClass}`}>
+                                                    <div key={sourceKey} className={cn('space-y-4 print:hidden py-1', theme.panelClass)}>
+                                                      <h2 className={`text-2xl font-bold ${theme.headerClass}`}>
                                                         {SOURCE_LABELS[sourceKey] || sourceKey}
                                                       </h2>
-                                                      <div className="space-y-8">
-                                                        {sourceChunks.map(chunk => (
-                                                          <div key={chunk.id} className="space-y-2 pb-6 border-b last:border-0 border-muted">
-                                                            <p className={`text-lg p-4 rounded-xl font-semibold ${theme.sourceCardClass}`}>
-                                                              {chunk.rawText}
-                                                            </p>
-                                                            <p className="text-lg text-black px-2 whitespace-pre-wrap">
-                                                              {chunk.explanationText.split('**').map((text, i) =>
-                                                                i % 2 === 1 ? <strong key={i} className={`${theme.accentClass} font-bold`}>{text}</strong> : text
-                                                              )}
-                                                            </p>
-                                                          </div>
+                                                      <div className="space-y-4">
+                                                        {sourceChunks.map((chunk, index) => (
+                                                          isBeitYosef ? (
+                                                            <div key={chunk.id} className={cn(index > 0 ? 'pt-4 border-t border-[#E3DAD0]' : '')}>
+                                                              <p className="text-[1.02rem] md:text-[1.06rem] leading-[1.95] font-sefer text-[#1E1C1A]">
+                                                                {chunk.rawText.trim()}
+                                                              </p>
+                                                              <div className={cn('mt-2 text-[1rem] leading-[1.9] text-black whitespace-pre-wrap', theme.borderAccent)}>
+                                                                {renderAccentText(chunk.explanationText, theme.accentClass)}
+                                                              </div>
+                                                            </div>
+                                                          ) : (
+                                                            <article key={chunk.id} className={cn('space-y-2', theme.explanationCardClass)}>
+                                                              <p className={`text-[1.04rem] md:text-[1.08rem] leading-[1.9] font-sefer ${theme.sourceCardClass}`}>
+                                                                {chunk.rawText.trim()}
+                                                              </p>
+                                                              <div className={cn('text-[1rem] leading-[1.9] text-black whitespace-pre-wrap', theme.borderAccent)}>
+                                                                {renderAccentText(chunk.explanationText, theme.accentClass)}
+                                                              </div>
+                                                            </article>
+                                                          )
                                                         ))}
                                                       </div>
                                                     </div>
                                                   );
                                                 })}
-
                                               {/* Summary section */}
                                               {activeGuide?.summaryText && (() => {
                                                 type SummarySection = {
@@ -587,11 +622,11 @@ export default function MyGuidesPage() {
                                                   }, []);
 
                                                 return (
-                                                  <div className="pt-8 border-t-2 border-primary/30">
-                                                    <div className="bg-gradient-to-br from-primary/5 via-primary/10 to-primary/5 rounded-2xl p-8 space-y-6 border border-primary/20">
-                                                      <div className="flex items-center gap-3 pb-4 border-b border-primary/20">
-                                                        <div className="w-10 h-10 bg-primary rounded-xl flex items-center justify-center text-white font-bold text-lg">📋</div>
-                                                        <h2 className="text-2xl font-bold text-primary">סיכום למבחן רבנות</h2>
+                                                  <div className="pt-8">
+                                                    <div className="p-8 space-y-6">
+                                                      <div className="flex items-center gap-3 pb-4">
+                                                        <div className="w-10 h-10 bg-[#6A3424] rounded-xl flex items-center justify-center text-white font-bold text-lg">📋</div>
+                                                        <h2 className="text-2xl font-bold text-[#6A3424]">סיכום למבחן רבנות</h2>
                                                       </div>
                                                       <div className="space-y-4 text-lg leading-relaxed">
                                                         {summarySections.length === 0 ? (
@@ -600,16 +635,16 @@ export default function MyGuidesPage() {
                                                           summarySections.map((section, sectionIndex) => (
                                                             <div
                                                               key={`${section.title}-${sectionIndex}`}
-                                                              className="rounded-xl border border-primary/20 bg-white/70 p-5 space-y-3"
+                                                              className="p-5 space-y-3"
                                                             >
-                                                              <h3 className="text-xl font-bold text-primary border-b border-primary/20 pb-2">
+                                                              <h3 className="text-xl font-bold text-[#6A3424]">
                                                                 {section.title}
                                                               </h3>
 
                                                               {section.paragraphs.map((paragraph, paragraphIndex) => (
                                                                 <p key={`p-${paragraphIndex}`} className="text-black leading-relaxed">
                                                                   {paragraph.split('**').map((text, i) =>
-                                                                    i % 2 === 1 ? <strong key={i} className="text-primary font-bold">{text}</strong> : text
+                                                                    i % 2 === 1 ? <strong key={i} className="text-[#6A3424] font-bold">{text}</strong> : text
                                                                   )}
                                                                 </p>
                                                               ))}
@@ -618,10 +653,10 @@ export default function MyGuidesPage() {
                                                                 <ul className="space-y-2">
                                                                   {section.items.map((item, itemIndex) => (
                                                                     <li key={`i-${itemIndex}`} className="flex gap-3 pr-2">
-                                                                      <span className="text-primary font-bold mt-0.5 shrink-0">•</span>
+                                                                      <span className="text-[#6A3424] font-bold mt-0.5 shrink-0">•</span>
                                                                       <p className="text-black">
                                                                         {item.split('**').map((text, i) =>
-                                                                          i % 2 === 1 ? <strong key={i} className="text-primary font-bold">{text}</strong> : text
+                                                                          i % 2 === 1 ? <strong key={i} className="text-[#6A3424] font-bold">{text}</strong> : text
                                                                         )}
                                                                       </p>
                                                                     </li>
