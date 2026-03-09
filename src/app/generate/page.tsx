@@ -9,7 +9,10 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { Input } from '@/components/ui/input';
-import { Loader2, CheckCircle2, AlertCircle, ArrowRight, Book, XCircle, Minus, FileText, Info, Bookmark, Copyright } from 'lucide-react';
+import { Badge } from '@/components/ui/badge';
+import { Progress } from '@/components/ui/progress';
+import { Separator } from '@/components/ui/separator';
+import { Loader2, CheckCircle2, AlertCircle, ArrowRight, Book, XCircle, Minus, FileText, Info, Bookmark, Copyright, Sparkles, ScrollText, LibraryBig, Clock3 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
@@ -66,6 +69,14 @@ const SOURCE_OPTIONS: { key: SourceKey; label: string; onlyOC: boolean }[] = [
   { key: 'mishnah_berurah', label: 'משנה ברורה', onlyOC: true },
   { key: 'torah_ohr', label: 'תורה אור', onlyOC: false },
 ];
+
+const SOURCE_DESCRIPTIONS: Record<SourceKey, string> = {
+  tur: 'יסוד הסימן ותמצית הכיוון ההלכתי.',
+  beit_yosef: 'שיטות, טעמים, וקיבוץ הדעות.',
+  shulchan_arukh: 'הפסיקה המרכזית בלשון ברורה.',
+  mishnah_berurah: 'הערות מעשיות, חילוקים והסתייגויות.',
+  torah_ohr: 'מהלך חסידי רציף עם ביאור עומק.',
+};
 
 const SOURCE_LABEL_BY_KEY: Record<SourceKey, string> = SOURCE_OPTIONS.reduce((acc, option) => {
   acc[option.key] = option.label;
@@ -657,6 +668,20 @@ export default function GeneratePage() {
   };
 
   const isInteractionDisabled = isUserLoading || status === 'processing' || !user;
+  const availableSources = SOURCE_OPTIONS
+    .filter(opt => !opt.onlyOC || section === 'Orach Chayim')
+    .filter(opt => section === 'Torah Ohr' ? opt.key === 'torah_ohr' : opt.key !== 'torah_ohr');
+  const selectedSourceDetails = availableSources.filter(opt => selectedSources.includes(opt.key));
+  const sectionLabel = SECTIONS.find(s => s.id === section)?.label || section;
+  const selectedSimanLabel = simanOptions.find(o => String(o.value) === siman)?.label || siman;
+  const selectedSeifLabel = seifOptions.find(o => String(o.value) === seif)?.label || seif;
+  const currentReference = isTorahOhrFullParasha
+    ? `${sectionLabel} ${selectedSimanLabel}`.trim()
+    : `${sectionLabel} ${selectedSimanLabel}${needsSeif && selectedSeifLabel ? `:${selectedSeifLabel}` : ''}`.trim();
+  const canGenerate = Boolean(user && siman && selectedSources.length > 0 && (!needsSeif || seif));
+  const studyModeLabel = section === 'Torah Ohr'
+    ? (torahOhrPassagesOnly ? 'קטעי מקור בלבד' : (torahOhrWholeParasha ? 'פרשה שלמה' : 'מאמר בודד'))
+    : 'ביאור הלכתי מלא';
 
   if (isUserLoading && status === 'idle') {
     return (
@@ -669,8 +694,350 @@ export default function GeneratePage() {
   return (
     <div className="min-h-screen bg-background pb-32">
       <Navigation />
-      <main className={cn("pt-24 px-6 mx-auto w-full", status === 'preview' ? 'max-w-[90rem]' : 'max-w-2xl')}>
+      <main
+        className={cn(
+          'pt-24 px-6 mx-auto w-full',
+          status === 'preview'
+            ? 'max-w-[90rem]'
+            : (status === 'idle' || status === 'error' ? 'max-w-7xl' : 'max-w-3xl'),
+        )}
+      >
         {(status === 'idle' || status === 'error') && (
+          <div className="grid gap-6 xl:grid-cols-[minmax(0,1.45fr)_22rem]">
+            <Card className="overflow-hidden rounded-[2rem] border border-stone-200 bg-[linear-gradient(180deg,#fffdf7_0%,#ffffff_100%)] shadow-[0_24px_80px_rgba(15,23,42,0.08)]">
+              <CardHeader className="border-b border-stone-200 bg-[radial-gradient(circle_at_top_left,_rgba(245,158,11,0.12),_transparent_34%),linear-gradient(135deg,#1f2937_0%,#334155_100%)] p-8 text-white">
+                <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
+                  <div className="max-w-2xl space-y-3">
+                    <div className="inline-flex h-14 w-14 items-center justify-center rounded-2xl bg-white/12 ring-1 ring-white/20">
+                      <Book className="h-7 w-7" />
+                    </div>
+                    <CardTitle className="text-3xl font-headline">׳‘׳™׳׳•׳¨ ׳׳™׳׳•׳“׳™ ׳‘׳ ׳•׳™ ׳˜׳•׳‘</CardTitle>
+                    <CardDescription className="max-w-xl text-base leading-7 text-white/75">
+                      ׳‘׳—׳¨ ׳׳§׳•׳¨, ׳§׳‘׳¢ ׳׳× ׳”׳׳•׳•׳—, ׳•׳‘׳ ׳” ׳“׳£ ׳׳™׳׳•׳“ ׳©׳׳׳¨׳’׳ ׳׳× ׳”׳”׳׳›׳”, ׳”׳©׳™׳˜׳•׳× ׳•׳”׳¡׳™׳›׳•׳ ׳‘׳¦׳•׳¨׳” ׳§׳¨׳™׳׳”.
+                    </CardDescription>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <Badge variant="secondary" className="rounded-full border-0 bg-white/12 px-3 py-1 text-white">
+                      <Sparkles className="ml-1.5 h-3.5 w-3.5" />
+                      ׳¡׳“׳¨ ׳׳ª׳™׳‘׳ª׳
+                    </Badge>
+                    <Badge variant="secondary" className="rounded-full border-0 bg-white/12 px-3 py-1 text-white">
+                      <ScrollText className="ml-1.5 h-3.5 w-3.5" />
+                      ׳¡׳™׳›׳•׳ ׳׳•׳‘׳ ׳”
+                    </Badge>
+                    <Badge variant="secondary" className="rounded-full border-0 bg-white/12 px-3 py-1 text-white">
+                      <LibraryBig className="ml-1.5 h-3.5 w-3.5" />
+                      ׳§׳¨׳™׳׳” ׳ ׳•׳—׳”
+                    </Badge>
+                  </div>
+                </div>
+              </CardHeader>
+
+              <CardContent className="space-y-6 p-6 md:p-8">
+                <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(18rem,24rem)]">
+                  <section className="space-y-6">
+                    <div className="rounded-[1.5rem] border border-stone-200 bg-white p-5 shadow-sm">
+                      <div className="mb-4 flex items-center justify-between">
+                        <div>
+                          <h2 className="text-lg font-bold text-slate-900">׳‘׳—׳™׳¨׳× ׳׳§׳•׳¨</h2>
+                          <p className="text-sm text-slate-500">׳‘׳—׳¨ ׳—׳׳§, ׳¡׳™׳׳ ׳•׳¡׳¢׳™׳£ ׳׳₪׳™ ׳׳” ׳©׳׳×׳” ׳¨׳•׳¦׳” ׳׳׳׳•׳“.</p>
+                        </div>
+                        <Badge variant="outline" className="rounded-full border-stone-300 bg-stone-50 text-slate-700">
+                          {studyModeLabel}
+                        </Badge>
+                      </div>
+
+                      <div className="space-y-5">
+                        <div className="space-y-3">
+                          <Label className="text-base font-bold">׳—׳׳§ ׳‘׳©׳•׳׳—׳ ׳¢׳¨׳•׳</Label>
+                          <Select value={section} onValueChange={setSection} disabled={isInteractionDisabled}>
+                            <SelectTrigger className="h-14 rounded-2xl border-stone-300 bg-stone-50 text-xl">
+                              <SelectValue placeholder="׳‘׳—׳¨ ׳—׳׳§" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {SECTIONS.map((s) => (
+                                <SelectItem key={s.id} value={s.id} className="text-lg">
+                                  {s.label}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+
+                        {section !== 'Torah Ohr' && (
+                          <div className="space-y-2 rounded-2xl border border-dashed border-stone-300 bg-stone-50/70 p-4">
+                            <Label className="text-sm font-semibold text-slate-700">׳§׳₪׳™׳¦׳” ׳׳”׳™׳¨׳”</Label>
+                            <div className="flex flex-col gap-2 sm:flex-row">
+                              <Input
+                                value={quickJumpRef}
+                                onChange={(e) => setQuickJumpRef(e.target.value)}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') {
+                                    e.preventDefault();
+                                    applyQuickJump();
+                                  }
+                                }}
+                                placeholder='׳“׳•׳’׳׳”: ׳¨׳₪׳—:׳’ ׳׳• 288:3'
+                                className="h-11 border-stone-300 bg-white"
+                                disabled={isInteractionDisabled}
+                                dir="rtl"
+                              />
+                              <Button
+                                type="button"
+                                variant="outline"
+                                className="h-11 shrink-0 rounded-xl border-stone-300 bg-white"
+                                onClick={applyQuickJump}
+                                disabled={isInteractionDisabled}
+                              >
+                                ׳§׳₪׳™׳¦׳”
+                              </Button>
+                            </div>
+                            {quickJumpError && (
+                              <p className="text-xs text-destructive">{quickJumpError}</p>
+                            )}
+                          </div>
+                        )}
+
+                        <div className={`grid gap-4 ${needsSeif ? 'md:grid-cols-2' : 'grid-cols-1'}`}>
+                          <div className="space-y-3">
+                            <Label className="text-base font-bold">{section === 'Torah Ohr' ? '׳₪׳¨׳©׳”' : '׳¡׳™׳׳'}</Label>
+                            {loadingSimanim ? (
+                              <div className="flex h-14 items-center justify-center rounded-2xl bg-stone-100 text-sm text-slate-500">
+                                <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+                                {section === 'Torah Ohr' ? '׳˜׳•׳¢׳ ׳₪׳¨׳©׳•׳×...' : '׳˜׳•׳¢׳ ׳¡׳™׳׳ ׳™׳...'}
+                              </div>
+                            ) : (
+                              <Select value={siman} onValueChange={setSiman} disabled={isInteractionDisabled}>
+                                <SelectTrigger className="h-14 rounded-2xl border-stone-300 bg-stone-50 text-xl">
+                                  <SelectValue placeholder={section === 'Torah Ohr' ? '׳‘׳—׳¨ ׳₪׳¨׳©׳”' : '׳‘׳—׳¨ ׳¡׳™׳׳'} />
+                                </SelectTrigger>
+                                <SelectContent className="max-h-[320px]">
+                                  {simanOptions.map(opt => (
+                                    <SelectItem key={opt.value} value={String(opt.value)} className="text-lg">
+                                      {opt.label}{section === 'Torah Ohr' ? '' : ` (${opt.value})`}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            )}
+                          </div>
+
+                          {needsSeif && (
+                            <div className="space-y-3">
+                              <Label className="text-base font-bold">{section === 'Torah Ohr' ? '׳׳׳׳¨' : '׳¡׳¢׳™׳£'}</Label>
+                              {loadingSeifim ? (
+                                <div className="flex h-14 items-center justify-center rounded-2xl bg-stone-100 text-sm text-slate-500">
+                                  <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+                                  {section === 'Torah Ohr' ? '׳˜׳•׳¢׳ ׳׳׳׳¨׳™׳...' : '׳˜׳•׳¢׳ ׳¡׳¢׳™׳₪׳™׳...'}
+                                </div>
+                              ) : (
+                                <Select value={seif} onValueChange={setSeif} disabled={isInteractionDisabled || seifOptions.length === 0}>
+                                  <SelectTrigger className="h-14 rounded-2xl border-stone-300 bg-stone-50 text-xl">
+                                    <SelectValue placeholder={section === 'Torah Ohr' ? '׳‘׳—׳¨ ׳׳׳׳¨' : '׳‘׳—׳¨ ׳¡׳¢׳™׳£'} />
+                                  </SelectTrigger>
+                                  <SelectContent className="max-h-[320px]">
+                                    {seifOptions.map(opt => (
+                                      <SelectItem key={opt.value} value={String(opt.value)} className="text-lg">
+                                        {opt.label}{section === 'Torah Ohr' ? '' : ` (${opt.value})`}
+                                      </SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    {section === 'Torah Ohr' && (
+                      <div className="rounded-[1.5rem] border border-stone-200 bg-white p-5 shadow-sm">
+                        <div className="mb-4">
+                          <h2 className="text-lg font-bold text-slate-900">׳׳¦׳‘ ׳׳™׳׳•׳“</h2>
+                          <p className="text-sm text-slate-500">׳§׳‘׳¢ ׳׳ ׳׳¢׳‘׳•׳“ ׳¢׳ ׳›׳ ׳”׳₪׳¨׳©׳” ׳׳• ׳¨׳§ ׳׳”׳¦׳’׳× ׳”׳§׳˜׳¢׳™׳.</p>
+                        </div>
+                        <div className="space-y-3">
+                          <label className="flex cursor-pointer items-start gap-3 rounded-2xl border border-dashed border-stone-300 bg-stone-50/70 p-4">
+                            <Checkbox
+                              checked={torahOhrWholeParasha}
+                              onCheckedChange={(checked) => setTorahOhrWholeParasha(!!checked)}
+                              disabled={isInteractionDisabled}
+                            />
+                            <div className="space-y-1">
+                              <p className="text-sm font-semibold text-slate-800">׳›׳ ׳”׳₪׳¨׳©׳” (׳›׳ ׳”׳׳׳׳¨׳™׳)</p>
+                              <p className="text-xs leading-6 text-slate-600">׳׳•׳׳׳¥ ׳›׳“׳™ ׳׳©׳׳•׳¨ ׳¢׳ ׳”׳¨׳¦׳£ ׳”׳¤׳ ׳™׳׳™ ׳©׳ ׳”׳׳׳׳¨׳™׳.</p>
+                            </div>
+                          </label>
+                          <label className="flex cursor-pointer items-start gap-3 rounded-2xl border border-stone-200 bg-white p-4">
+                            <Checkbox
+                              checked={torahOhrPassagesOnly}
+                              onCheckedChange={(checked) => setTorahOhrPassagesOnly(!!checked)}
+                              disabled={isInteractionDisabled}
+                            />
+                            <div className="space-y-1">
+                              <p className="text-sm font-semibold text-slate-800">׳׳¦׳‘ ׳§׳˜׳¢׳™׳ ׳‘׳׳‘׳“ (׳׳׳ ׳‘׳™׳׳•׳¨ AI)</p>
+                              <p className="text-xs leading-6 text-slate-600">׳׳׳™׳¨ ׳™׳•׳×׳¨ ׳•׳׳¦׳™׳’ ׳׳× ׳”׳§׳˜׳¢׳™׳ ׳›׳׳• ׳©׳”׳.</p>
+                            </div>
+                          </label>
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="rounded-[1.5rem] border border-stone-200 bg-white p-5 shadow-sm">
+                      <div className="mb-4">
+                        <h2 className="text-lg font-bold text-slate-900">׳׳§׳•׳¨׳•׳× ׳׳©׳™׳׳•׳‘</h2>
+                        <p className="text-sm text-slate-500">׳‘׳—׳¨ ׳׳™׳–׳” ׳׳§׳•׳¨׳•׳× ׳™׳›׳ ׳¡׳• ׳׳׳•׳×׳• ׳“׳£ ׳׳™׳׳•׳“.</p>
+                      </div>
+                      <div className="grid gap-3 md:grid-cols-2">
+                        {availableSources.map(opt => (
+                          <label
+                            key={opt.key}
+                            className={cn(
+                              'flex cursor-pointer items-start gap-3 rounded-2xl border p-4 transition-all',
+                              selectedSources.includes(opt.key)
+                                ? 'border-slate-900 bg-slate-900 text-white shadow-lg shadow-slate-900/10'
+                                : 'border-stone-200 bg-stone-50/70 hover:border-stone-300 hover:bg-white',
+                            )}
+                          >
+                            <Checkbox
+                              checked={selectedSources.includes(opt.key)}
+                              onCheckedChange={(checked) => toggleSource(opt.key, !!checked)}
+                              disabled={isInteractionDisabled}
+                            />
+                            <div className="space-y-1">
+                              <p className="text-lg font-semibold">{opt.label}</p>
+                              <p className={cn('text-sm leading-6', selectedSources.includes(opt.key) ? 'text-white/80' : 'text-slate-500')}>
+                                {SOURCE_DESCRIPTIONS[opt.key]}
+                              </p>
+                            </div>
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+
+                    {(selectedSources.includes('tur') || selectedSources.includes('beit_yosef')) && (
+                      <div className="rounded-[1.5rem] border border-stone-200 bg-white p-5 shadow-sm">
+                        <div className="mb-4">
+                          <h2 className="text-lg font-bold text-slate-900">׳׳׳ ׳” ׳™׳“׳ ׳™׳×</h2>
+                          <p className="text-sm text-slate-500">׳¨׳§ ׳׳ ׳׳×׳” ׳¨׳•׳¦׳” ׳׳›׳₪׳•׳ª ׳˜׳§׳¡׳˜ ׳¢׳ ׳¤׳ ׳™ ׳”׳׳©׳™׳›׳” ׳”׳׳•׳˜׳•׳׳˜׳™׳×.</p>
+                        </div>
+                        <div className="space-y-5">
+                          {selectedSources.includes('tur') && (
+                            <div className="space-y-3">
+                              <Label className="text-base font-bold text-slate-700">׳˜׳•׳¨ (׳¨׳©׳•׳×)</Label>
+                              <Textarea
+                                placeholder="׳˜׳§׳¡׳˜ ׳׳“׳•׳™׳§ ׳׳˜׳•׳¨ (׳”׳©׳׳¨ ׳¨׳™׳§ ׳׳׳©׳™׳›׳” ׳׳•׳˜׳•׳׳˜׳™׳× ׳”׳—׳›׳׳”)"
+                                className="min-h-[120px] rounded-2xl border-stone-300 bg-stone-50/70 text-base font-sefer"
+                                value={manualTurText}
+                                onChange={(e) => setManualTurText(e.target.value)}
+                                disabled={isInteractionDisabled}
+                                dir="rtl"
+                              />
+                            </div>
+                          )}
+                          {selectedSources.includes('beit_yosef') && (
+                            <div className="space-y-3">
+                              <Label className="text-base font-bold text-slate-700">׳‘׳™׳× ׳™׳•׳¡׳£ (׳¨׳©׳•׳×)</Label>
+                              <Textarea
+                                placeholder="׳˜׳§׳¡׳˜ ׳׳“׳•׳™׳§ ׳׳‘׳™׳× ׳™׳•׳¡׳£ (׳”׳©׳׳¨ ׳¨׳™׳§ ׳׳׳©׳™׳›׳” ׳׳•׳˜׳•׳׳˜׳™׳× ׳”׳—׳›׳׳”)"
+                                className="min-h-[120px] rounded-2xl border-stone-300 bg-stone-50/70 text-base font-sefer"
+                                value={manualByText}
+                                onChange={(e) => setManualByText(e.target.value)}
+                                disabled={isInteractionDisabled}
+                                dir="rtl"
+                              />
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </section>
+
+                  <aside className="space-y-5">
+                    <Card className="rounded-[1.5rem] border border-stone-200 bg-stone-50/80 shadow-sm xl:sticky xl:top-28">
+                      <CardHeader className="space-y-4">
+                        <div className="flex items-center justify-between gap-3">
+                          <div>
+                            <CardTitle className="text-xl font-bold text-slate-900">׳ª׳¦׳•׳’׳ ׳׳¤׳ ׳™ ׳™׳¦׳™׳¨׳”</CardTitle>
+                            <CardDescription className="text-sm text-slate-500">
+                              ׳›׳š ׳™׳¨׳׳” ׳׳•׳§׳“ ׳”׳׳™׳׳•׳“ ׳©׳׳×׳” ׳‘׳•׳ ׳”.
+                            </CardDescription>
+                          </div>
+                          <Badge variant="outline" className="rounded-full border-stone-300 bg-white text-slate-700">
+                            {selectedSourceDetails.length} ׳׳§׳•׳¨׳•׳×
+                          </Badge>
+                        </div>
+                        <div className="rounded-2xl border border-stone-200 bg-white p-4 text-right" dir="rtl">
+                          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Reference</p>
+                          <p className="mt-2 text-lg font-bold text-slate-900">{currentReference || '׳‘׳—׳¨ ׳׳§׳•׳¨'}</p>
+                          <p className="mt-2 text-sm text-slate-500">{studyModeLabel}</p>
+                        </div>
+                      </CardHeader>
+                      <CardContent className="space-y-4">
+                        <div className="space-y-2 text-right" dir="rtl">
+                          {selectedSourceDetails.length > 0 ? selectedSourceDetails.map((source) => (
+                            <div key={source.key} className="rounded-2xl border border-stone-200 bg-white p-3">
+                              <div className="flex items-center justify-between gap-3">
+                                <span className="text-sm font-semibold text-slate-900">{source.label}</span>
+                                <Badge variant="secondary" className="rounded-full bg-stone-100 text-slate-700">
+                                  ׳₪׳¢׳™׳
+                                </Badge>
+                              </div>
+                              <p className="mt-2 text-sm leading-6 text-slate-500">
+                                {SOURCE_DESCRIPTIONS[source.key]}
+                              </p>
+                            </div>
+                          )) : (
+                            <div className="rounded-2xl border border-dashed border-stone-300 bg-white p-4 text-sm text-slate-500" dir="rtl">
+                              ׳‘׳—׳¨ ׳׳₪׳—׳•׳× ׳׳§׳•׳¨ ׳׳—׳“ ׳›׳“׳™ ׳׳”׳×׳—׳™׳.
+                            </div>
+                          )}
+                        </div>
+
+                        <Separator className="bg-stone-200" />
+
+                        <div className="space-y-3 text-right" dir="rtl">
+                          <div className="flex items-center gap-2 text-slate-700">
+                            <Clock3 className="h-4 w-4" />
+                            <span className="text-sm font-medium">׳׳•׳×׳׳ ׳׳§׳¨׳™׳׳” ׳•׳׳—׳–׳¨׳”</span>
+                          </div>
+                          <ul className="space-y-2 text-sm leading-6 text-slate-500">
+                            <li>׳¢׳¨׳™׳›׳” ׳¡׳•׳₪׳™׳× ׳‘׳¡׳’׳ ׳•׳ ׳׳ª׳™׳‘׳ª׳ ׳¢׳ ׳¡׳™׳›׳•׳ ׳׳¢׳©׳™.</li>
+                            <li>׳§׳™׳‘׳•׳¥ ׳“׳¢׳•׳× ׳“׳•׳׳•׳× ׳‘׳׳§׳•׳ ׳—׳–׳¨׳•׳× ׳׳™׳™׳’׳¢׳•׳×.</li>
+                            <li>׳”׳¦׳’׳” ׳ ׳§׳™׳” ׳¢׳ ׳”׳₪׳¨׳“׳” ׳‘׳™׳ ׳׳§׳•׳¨, ׳‘׳™׳׳•׳¨ ׳•׳”׳›׳¨׳¢׳”.</li>
+                          </ul>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  </aside>
+                </div>
+
+                {error && (
+                  <div className="flex items-start gap-3 rounded-2xl border border-destructive/20 bg-destructive/10 p-4 text-destructive animate-in fade-in slide-in-from-top-2">
+                    <AlertCircle className="mt-0.5 h-5 w-5 shrink-0" />
+                    <span className="text-sm font-medium">{error}</span>
+                  </div>
+                )}
+
+                <div className="flex flex-col gap-3 rounded-[1.5rem] border border-stone-200 bg-stone-50/80 p-4 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="text-right" dir="rtl">
+                    <p className="text-sm font-semibold text-slate-800">׳׳•׳›׳ ׳׳”׳₪׳§׳× ׳“׳£ ׳”׳׳™׳׳•׳“</p>
+                    <p className="text-sm text-slate-500">׳”׳׳¢׳¨׳›׳× ׳ª׳‘׳ ׳” ׳‘׳™׳׳•׳¨׳™׳, ׳ª׳¦׳•׳¨ ׳¡׳™׳›׳•׳ ׳•׳ª׳׳₪׳©׳¨ ׳™׳™׳¦׳•׳ ׳-Google Docs.</p>
+                  </div>
+                  <Button
+                    onClick={handleGenerate}
+                    className="h-14 rounded-2xl bg-slate-900 px-8 text-lg text-white shadow-lg shadow-slate-900/15 hover:bg-slate-800"
+                    disabled={isInteractionDisabled || !canGenerate}
+                  >
+                    {!user ? '׳׳×׳—׳‘׳¨ ׳׳׳¢׳¨׳›׳×...' : '׳”׳×׳—׳ ׳‘׳ ׳™׳™׳× ׳”׳“׳£'}
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        )}
+
+        {false && (status === 'idle' || status === 'error') && (
           <Card className="shadow-2xl border-none rounded-[2.5rem] overflow-hidden bg-white">
             <CardHeader className="bg-primary text-primary-foreground p-10 text-center">
               <div className="w-16 h-16 bg-white/20 rounded-2xl flex items-center justify-center mx-auto mb-6">
@@ -917,14 +1284,11 @@ export default function GeneratePage() {
               </div>
 
               {status === 'processing' && (
-                <div className="space-y-2 w-full max-w-md">
-                  {/* Progress bar */}
-                  <div className="w-full bg-muted rounded-full h-3 overflow-hidden shadow-inner">
-                    <div
-                      className="h-full bg-gradient-to-l from-primary to-primary/70 rounded-full transition-all duration-500 ease-out"
-                      style={{ width: isSummaryPhase ? '100%' : `${pct}%` }}
+                  <div className="space-y-2 w-full max-w-md">
+                    <Progress
+                      value={isSummaryPhase ? 100 : pct}
+                      className="h-3 overflow-hidden rounded-full bg-muted shadow-inner"
                     />
-                  </div>
 
                   {/* Progress details */}
                   <div className="flex items-center justify-between text-xs text-muted-foreground px-1">
@@ -979,8 +1343,8 @@ export default function GeneratePage() {
             const isTorahOhr = sr.sourceKey === 'torah_ohr';
 
             return (
-              <div key={sr.sourceKey} className={cn('mb-12', theme.panelClass)}>
-                <div className="flex items-center justify-between border-b-2 border-slate-300 pb-2 mb-6">
+              <div key={sr.sourceKey} className={cn('mb-8 overflow-hidden rounded-[1.75rem] border border-stone-200 bg-white shadow-[0_20px_60px_rgba(15,23,42,0.05)]', theme.panelClass)}>
+                <div className="mb-2 flex items-center justify-between border-b border-stone-200 bg-stone-50/80 px-4 py-3">
                   <Toolbar />
                   {theme.isMainSource || !compact ? (
                     <h2 className={cn('text-2xl md:text-3xl font-bold font-sefer pl-2', theme.titleColor)}>
@@ -993,11 +1357,11 @@ export default function GeneratePage() {
                   )}
                 </div>
 
-                <ScrollArea className={compact ? 'h-[45vh]' : undefined}>
-                  <div className={cn('text-right mx-auto', compact ? 'px-4 py-4' : 'px-5 md:px-7 py-5', isTorahOhr ? 'max-w-3xl' : '')} dir="rtl">
+                <ScrollArea className={compact ? 'max-h-[60vh]' : undefined}>
+                  <div className={cn('mx-auto text-right', compact ? 'px-4 py-5' : 'px-5 py-6 md:px-7', isTorahOhr ? 'max-w-3xl' : '')} dir="rtl">
                     {sr.chunks.map((chunk, index) => (
                       isBeitYosef || isTorahOhr ? (
-                        <div key={chunk.id || index} className={cn(index > 0 ? (isTorahOhr ? 'mt-4' : 'mt-5 pt-5 border-t border-slate-200') : '')}>
+                        <div key={chunk.id || index} className={cn(index > 0 ? (isTorahOhr ? 'mt-4' : 'mt-6 border-t border-stone-200 pt-6') : '')}>
                           {!isTorahOhr && (
                             <p className={cn(
                               'font-sefer leading-[1.4] text-slate-800 space-y-2 mb-3',
@@ -1007,8 +1371,8 @@ export default function GeneratePage() {
                             </p>
                           )}
                           <div className={cn(
-                            'whitespace-pre-wrap',
-                            !isTorahOhr && 'mt-2 border-r-2 pr-4',
+                            'whitespace-pre-wrap rounded-r-2xl',
+                            !isTorahOhr && 'mt-3 border-r-2 bg-stone-50/70 pr-4 py-3',
                             isTorahOhr ? 'font-sefer text-slate-800' : 'text-slate-700',
                             compact ? 'text-base leading-[1.4]' : (isTorahOhr ? 'text-lg leading-[1.5]' : 'text-lg leading-[1.4]'),
                             !isTorahOhr && theme.borderAccent,
@@ -1019,7 +1383,7 @@ export default function GeneratePage() {
                       ) : (
                         <article
                           key={chunk.id || index}
-                          className={cn('py-2', index > 0 ? 'mt-4 border-t border-slate-200 pt-4' : '')}
+                          className={cn('py-2', index > 0 ? 'mt-6 border-t border-stone-200 pt-6' : '')}
                         >
                           <p className={cn(
                             'font-sefer leading-[1.4] space-y-2 mb-3 text-slate-800',
@@ -1028,7 +1392,7 @@ export default function GeneratePage() {
                             {chunk.rawText.trim()}
                           </p>
                           <div className={cn(
-                            'mt-3 border-r-2 pr-4 text-slate-700 whitespace-pre-wrap',
+                            'mt-3 whitespace-pre-wrap rounded-r-2xl border-r-2 bg-stone-50/70 pr-4 py-3 text-slate-700',
                             compact ? 'text-base leading-[1.4]' : 'text-lg leading-[1.4]',
                             theme.borderAccent,
                           )}>
@@ -1066,7 +1430,113 @@ export default function GeneratePage() {
                 <h1 className="text-xl font-bold font-sefer text-slate-800">{guide?.tref}</h1>
               </div>
 
-              <div className="hidden lg:flex flex-col gap-5">
+              <div className="grid gap-8 xl:grid-cols-[minmax(0,1fr)_22rem]">
+                <div className="space-y-8">
+                  <div className="hidden lg:flex flex-col gap-5">
+                    {mainSources.map(sr => renderSourcePanel(sr, false))}
+                    {commentarySources.length > 0 && (
+                      <div className={cn('grid gap-5', commentarySources.length === 1 ? 'grid-cols-1' : 'grid-cols-2')}>
+                        {commentarySources.map(sr => renderSourcePanel(sr, true))}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="lg:hidden">
+                    <Tabs defaultValue={previewSourceResults[0]?.sourceKey} dir="rtl">
+                      <TabsList className="mb-6 flex h-auto w-full flex-wrap gap-2 rounded-none border-b border-slate-300 bg-transparent p-0 pb-2">
+                        {previewSourceResults.map((sr) => {
+                          const theme = SOURCE_THEME[sr.sourceKey] || SOURCE_THEME.shulchan_arukh;
+                          return (
+                            <TabsTrigger
+                              key={sr.sourceKey}
+                              value={sr.sourceKey}
+                              className={cn(
+                                'min-w-[4rem] flex-1 rounded-none bg-transparent py-2 text-lg font-bold font-sefer data-[state=active]:border-b-2 data-[state=active]:border-slate-800 data-[state=active]:bg-transparent data-[state=active]:shadow-none',
+                                theme.isMainSource ? 'data-[state=active]:text-slate-900' : 'text-slate-600'
+                              )}
+                            >
+                              {sr.hebrewLabel}
+                            </TabsTrigger>
+                          );
+                        })}
+                      </TabsList>
+
+                      {previewSourceResults.map((sr) => (
+                        <TabsContent key={sr.sourceKey} value={sr.sourceKey}>
+                          {renderSourcePanel(sr, true)}
+                        </TabsContent>
+                      ))}
+                    </Tabs>
+                  </div>
+                </div>
+
+                <aside className="space-y-6 xl:sticky xl:top-28 xl:self-start">
+                  <Card className="rounded-[1.75rem] border border-stone-200 bg-white shadow-[0_20px_60px_rgba(15,23,42,0.06)]">
+                    <CardHeader className="border-b border-stone-200">
+                      <div className="flex items-center justify-between">
+                        <Toolbar />
+                        <h2 className="pl-2 text-2xl font-bold font-sefer text-slate-800">
+                          ׳¡׳™׳›׳•׳
+                        </h2>
+                      </div>
+                    </CardHeader>
+                    <CardContent className="space-y-8 pt-6 font-sefer text-right text-lg leading-[1.5] text-slate-800" dir="rtl">
+                      {summarySections.length > 0 ? (
+                        summarySections.map((section, idx) => (
+                          <section key={`${section.title}-${idx}`}>
+                            <h3 className="mb-3 inline-block border-b border-stone-200 pb-2 text-xl font-bold text-slate-900">
+                              {section.title}
+                            </h3>
+                            {section.paragraphs.map((paragraph, pIdx) => (
+                              <p key={`p-${pIdx}`} className="mb-2 text-slate-700">
+                                {renderAccentText(paragraph, 'text-slate-900')}
+                              </p>
+                            ))}
+                            {section.items.length > 0 && (
+                              <ul className="mt-3 space-y-2 text-slate-700">
+                                {section.items.map((item, itemIdx) => (
+                                  <li key={`i-${itemIdx}`} className="flex items-start gap-2.5">
+                                    <span className="mt-1 text-slate-400">ג€¢</span>
+                                    <span>{renderAccentText(item, 'text-slate-900')}</span>
+                                  </li>
+                                ))}
+                              </ul>
+                            )}
+                          </section>
+                        ))
+                      ) : (
+                        <p className="text-slate-400">׳׳ ׳ ׳•׳¦׳¨ ׳¡׳™׳›׳•׳.</p>
+                      )}
+                    </CardContent>
+                  </Card>
+
+                  <Card className="rounded-[1.5rem] border border-stone-200 bg-stone-50/80">
+                    <CardContent className="space-y-4 p-5">
+                      <div className="text-right" dir="rtl">
+                        <p className="text-sm font-semibold text-slate-800">{guide?.tref}</p>
+                        <p className="mt-1 text-sm text-slate-500">׳׳¦׳‘ ׳§׳¨׳™׳׳” ׳•׳™׳™׳¦׳•׳</p>
+                      </div>
+                      <div className="flex flex-col gap-2">
+                        <Button
+                          onClick={handleExport}
+                          className="h-11 rounded-xl bg-slate-900 text-white hover:bg-slate-800"
+                        >
+                          ׳׳™׳™׳¦׳ ׳-Google Docs <ArrowRight className="mr-2 h-4 w-4 rotate-180" />
+                        </Button>
+                        <Button
+                          variant="outline"
+                          onClick={() => setStatus('idle')}
+                          className="h-11 rounded-xl border-stone-300 bg-white text-slate-700 hover:bg-stone-50"
+                        >
+                          ׳—׳–׳•׳¨ ׳׳¢׳¨׳™׳›׳”
+                        </Button>
+                      </div>
+                    </CardContent>
+                  </Card>
+                </aside>
+              </div>
+
+              <div className="hidden">
                 {mainSources.map(sr => renderSourcePanel(sr, false))}
                 {commentarySources.length > 0 && (
                   <div className={cn('grid gap-5', commentarySources.length === 1 ? 'grid-cols-1' : 'grid-cols-2')}>
@@ -1075,7 +1545,7 @@ export default function GeneratePage() {
                 )}
               </div>
 
-              <div className="lg:hidden">
+              <div className="hidden">
                 <Tabs defaultValue={previewSourceResults[0]?.sourceKey} dir="rtl">
                   <TabsList className="w-full h-auto flex-wrap gap-2 bg-transparent border-b border-slate-300 p-0 mb-6 pb-2 rounded-none">
                     {previewSourceResults.map((sr) => {
@@ -1103,7 +1573,7 @@ export default function GeneratePage() {
                 </Tabs>
               </div>
 
-              <div className="mb-12">
+              <div className="hidden">
                 <div className="flex items-center justify-between border-b-2 border-slate-300 pb-2 mb-6">
                   <Toolbar />
                   <h2 className="text-2xl md:text-3xl font-bold font-sefer pl-2 text-slate-800">
@@ -1140,7 +1610,7 @@ export default function GeneratePage() {
                 </div>
               </div>
 
-              <div className="flex gap-2 justify-center pt-1 pb-8">
+              <div className="hidden">
                 <Button
                   onClick={handleExport}
                   size="sm"

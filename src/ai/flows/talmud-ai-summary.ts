@@ -60,6 +60,36 @@ function validateSummary(text: string, isTorahOhr: boolean = false): { valid: bo
   return { valid: errors.length === 0, errors };
 }
 
+function buildHalakhicSummaryStructure(sources: string[]): string {
+  const sections: string[] = [];
+
+  if (sources.includes('tur')) {
+    sections.push(`## דברי הטור
+- סכם בקצרה את יסוד הדין, ההגדרה, והכיוון המעשי של הטור (טור).`);
+  }
+
+  if (sources.includes('beit_yosef')) {
+    sections.push(`## שיטות הבית יוסף
+- סדר את הדעות המרכזיות בקצרה, עם קיבוץ דעות דומות לאותו מהלך (בית יוסף).
+- אם אין מחלוקת ממשית, כתוב זאת במפורש בשורה קצרה (בית יוסף).`);
+  }
+
+  if (sources.includes('shulchan_arukh')) {
+    sections.push(`## פסק השולחן ערוך
+- כתוב את ההכרעה של השולחן ערוך בצורה ברורה, קצרה ומעשית (שולחן ערוך).`);
+  }
+
+  if (sources.includes('mishnah_berurah')) {
+    sections.push(`## חידושי המשנה ברורה
+- ציין בקצרה את ההוספות המעשיות, החילוקים וההסתייגויות של המשנה ברורה (משנה ברורה).`);
+  }
+
+  sections.push(`## סיכום והכרעה
+- כתוב את השורה התחתונה למעשה, וציין בקצרה מי מחמיר, מי מקל, ומה נפסק (סיכום).`);
+
+  return sections.join('\n\n');
+}
+
 function getStyleRules(isTorahOhr: boolean): string {
   if (isTorahOhr) {
     return `You are writing a concise summary of spiritual concepts from Torah Ohr (Hassidut).
@@ -99,9 +129,31 @@ Strict constraints:
 8) Maximum 6 topics total.`;
 }
 
+function getStructuredStyleRules(sources: string[], isTorahOhr: boolean): string {
+  if (isTorahOhr) {
+    return getStyleRules(true);
+  }
+
+  return `You are writing a concise metivta-style Rabanut exam summary.
+Output language: Hebrew only.
+
+Mandatory structure:
+${buildHalakhicSummaryStructure(sources)}
+
+Strict constraints:
+1) Keep it short, structured, and practical. No long explanations.
+2) Group similar views together instead of repeating them.
+3) If there is no real מחלוקת, say so explicitly in one short bullet.
+4) Do not write "(מקור לא צוין)".
+5) Do not write "הכרעה למעשה".
+6) No intro or outro text.
+7) Keep the order of the sections exactly as requested.
+8) End with a short bottom line in the section "סיכום והכרעה".`;
+}
+
 function buildSummaryPrompt(studyGuideText: string, sources: string[]) {
   const isTorahOhr = sources.includes('torah_ohr');
-  return `${getStyleRules(isTorahOhr)}
+  return `${getStructuredStyleRules(sources, isTorahOhr)}
 
 Included sources: ${sources.join(', ')}
 
@@ -206,7 +258,7 @@ export const talmudAISummaryFlow = ai.defineFlow(
     if (!validation.valid) {
       const repairPrompt = `The summary is invalid: ${validation.errors.join(', ')}.
 Rewrite it using the exact same information but following these strict rules:
-${getStyleRules(isTorahOhr)}
+${getStructuredStyleRules(input.sources, isTorahOhr)}
 
 Invalid summary:
 ${summary}

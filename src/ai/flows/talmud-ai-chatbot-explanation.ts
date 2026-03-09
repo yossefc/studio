@@ -11,7 +11,7 @@ import { FieldValue } from 'firebase-admin/firestore';
 import { getAdminDb } from '@/server/firebase-admin';
 import { HEBREW_RATIO_THRESHOLD } from '@/lib/constants';
 
-const PROMPT_VERSION = 'v3.5-rabbanut';
+const PROMPT_VERSION = 'v3.6-metivta';
 
 const SOURCE_LABELS: Record<string, string> = {
   tur: 'טור',
@@ -45,6 +45,47 @@ const TalmudAIChatbotExplanationOutputSchema = z.object({
 });
 
 export type TalmudAIChatbotExplanationOutput = z.infer<typeof TalmudAIChatbotExplanationOutputSchema>;
+
+function getMetivtaStyleInstructions(): string {
+  return `Style requirements:
+- Write in clear, structured Hebrew in a ישיבתי / מתיבתא style.
+- Produce a real ביאור, not a rewrite of the source text.
+- Explain the מהלך, the סברא, and the הלכה למעשה where the text supports it.
+- Group similar views together instead of repeating them separately.
+- If there is no real dispute, say so explicitly and do not force a מחלוקת.
+- Do not invent sources, arguments, or practical rulings not grounded in the given text.`;
+}
+
+function getSourceSpecificInstructions(sourceKey: string): string {
+  switch (sourceKey) {
+    case 'tur':
+      return `Source-specific instructions for טור:
+- Clarify the יסוד הדין, the גדר, and the practical direction of the Tur.
+- If the Tur implies a חומרא, קולא, or a specific חילוק, state it plainly.
+- Focus on the underlying rule and its practical frame, not on paraphrasing every phrase.`;
+    case 'beit_yosef':
+      return `Source-specific instructions for בית יוסף:
+- Summarize each main שיטה clearly and briefly.
+- For each שיטה, explain its core סברא in one focused line.
+- If several opinions follow the same יסוד, combine them under one shared presentation.
+- Distinguish between: identical views, similar views with different details, and true disputes.
+- If the בית יוסף appears to lean toward one side or to decide between opinions, mention that carefully.`;
+    case 'shulchan_arukh':
+      return `Source-specific instructions for שולחן ערוך:
+- Present the psak of the שולחן ערוך in a precise and practical way.
+- Clarify whether the ruling is simple, conditional, or built on a חילוק.
+- If the wording reflects one of the earlier approaches, state that briefly when it is reasonably clear from the text.
+- Keep the explanation focused on the final operative halakhah.`;
+    case 'mishnah_berurah':
+      return `Source-specific instructions for משנה ברורה:
+- Present the main חידושים of the משנה ברורה in מתיבתא style.
+- Highlight clarifications, limitations, practical cases, and relevant nuances.
+- If the משנה ברורה narrows, expands, or explains the שולחן ערוך, say so briefly.
+- Prefer practical distinctions and נפקא מינות over textual paraphrase.`;
+    default:
+      return `Write a structured halakhic explanation in מתיבתא style, with clarity, reasoning, and practical takeaway.`;
+  }
+}
 
 function validateHebrewOutput(text: string): boolean {
   if (!text || text.trim().length === 0) {
@@ -246,6 +287,20 @@ export const talmudAIChatbotExplanationFlow = ai.defineFlow(
       ? `\nהטקסט הוזן ידנית. חובה לייצר ביאור פרשני אמיתי; אסור להחזיר נוסח דומה למקור או שכתוב שלו.\n`
       : '';
 
+    const structuredCompanionSection = input.companionText
+      ? `\nCompanion text from משנה ברורה:\n${input.companionText}\n\nAfter explaining ${sourceLabel}, add a separate section with the exact heading "משנה ברורה". In that section:
+- summarize the main חידושים of the משנה ברורה,
+- include practical notes, limitations, and distinctions,
+- group related points together,
+- mention סעיף קטן when it is known from the text.\n`
+      : companionSection;
+
+    const structuredBeitYosefAddition = input.sourceKey === 'beit_yosef'
+      ? `\nAdditional requirement for בית יוסף:
+- End each major opinion with one short summary line.
+- When multiple opinions express the same core idea, combine them into one shared summary instead of repeating them.\n`
+      : '';
+
     let basePrompt = '';
 
     if (input.sourceKey === 'torah_ohr') {
@@ -288,6 +343,32 @@ Source to explain (${sourceLabel}):
 ${input.currentSegment}
 
 Return only the explanation in Hebrew:`;
+      basePrompt = `You are a professional halakhic explainer for Rabbanut students.
+Respond in Hebrew only.
+
+Goal: produce a true ביאור in מתיבתא style, not a rewrite of the source text.
+
+Mandatory rules:
+1) Do NOT copy the source sentence-by-sentence and do NOT return a light paraphrase of it.
+2) Do NOT quote more than 6 consecutive words from the source (except short technical terms).
+3) Explain each central point with substance:
+   - what the line means in plain language,
+   - the halakhic reasoning/principle behind it,
+   - the practical implication (הלכה למעשה) when grounded in the text.
+4) If there is a dispute, clearly separate opinions and state the practical outcome.
+5) Expand abbreviations and explain difficult/Aramaic terms.
+6) No intro, no summary outro, no meta-comments. Start directly with the explanation.
+7) Do not invent sources or claims not grounded in the given text.
+8) Use short internal headings only when they improve clarity.
+
+${getMetivtaStyleInstructions()}
+
+${getSourceSpecificInstructions(input.sourceKey)}
+${manualInputAddition}${structuredBeitYosefAddition}${contextPrompt}${structuredCompanionSection}
+Source to explain (${sourceLabel}):
+${input.currentSegment}
+
+Return only the explanation in Hebrew:`;
     }
 
     const generated = await generateTextWithFallback({
@@ -303,12 +384,14 @@ Return only the explanation in Hebrew:`;
 
     if (shouldCheckRewrite && isLikelySourceRewrite(input.currentSegment, explanation)) {
       const rewriteRepairPrompt = `The draft below is too close to the source and reads like a rewrite.
-Rewrite it as a real halakhic explanation in Hebrew.
+Rewrite it as a real halakhic explanation in Hebrew in a clear מתיבתא style.
 
 Rules:
 - Do not preserve the source sentence order.
 - Do not quote more than 6 consecutive words from the source.
 - Focus on explanation, reasoning, and practical implications.
+- Group similar views together and do not repeat the same point in different words.
+- If there is no real dispute, say so briefly instead of forcing a מחלוקת.
 - No intro/outro/meta text.
 
 Source:
