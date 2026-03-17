@@ -1,10 +1,10 @@
 
-import type {Metadata} from 'next';
+import type { Metadata } from 'next';
 import './globals.css';
 import { FirebaseClientProvider } from '@/firebase/client-provider';
 
 export const metadata: Metadata = {
-  title: 'TalmudAI - Rabbinic Study Guide Generator',
+  title: 'Talmud - Rabbinic Study Guide Generator',
   description: 'AI-powered contextual explanations and summaries for Jewish texts.',
 };
 

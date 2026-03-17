@@ -1,17 +1,38 @@
 'use client';
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Navigation } from '@/components/Navigation';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 import { useAuth, useUser } from '@/firebase';
 import { GoogleAuthProvider, signInWithPopup } from 'firebase/auth';
 import { initiateAnonymousSignIn } from '@/firebase/non-blocking-login';
 import { useRouter } from 'next/navigation';
-import { Ghost, Loader2 } from 'lucide-react';
+import { AlertCircle, Ghost, Loader2 } from 'lucide-react';
 import { useEffect } from 'react';
 
 const googleProvider = new GoogleAuthProvider();
+
+function getAuthErrorMessage(error: unknown, hostLabel: string): string {
+  const code = typeof error === 'object' && error !== null && 'code' in error
+    ? String((error as { code?: unknown }).code ?? '')
+    : '';
+
+  if (code === 'auth/unauthorized-domain') {
+    return `הדומיין ${hostLabel} אינו מורשה ב-Firebase Authentication. יש להוסיף אותו ב-Firebase Console > Authentication > Settings > Authorized domains.`;
+  }
+
+  if (code === 'auth/popup-closed-by-user') {
+    return 'חלון ההתחברות נסגר לפני סיום התהליך.';
+  }
+
+  if (code === 'auth/popup-blocked') {
+    return 'הדפדפן חסם את חלון ההתחברות. יש לאפשר Popups ולנסות שוב.';
+  }
+
+  return 'ההתחברות עם Google נכשלה. נסה שנית.';
+}
 
 export default function LoginPage() {
   const { user, isUserLoading } = useUser();
@@ -20,6 +41,14 @@ export default function LoginPage() {
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const hostLabel = useMemo(() => {
+    if (typeof window === 'undefined') return 'localhost';
+    return window.location.host || 'localhost';
+  }, []);
+  const isLocalHost = useMemo(() => {
+    if (typeof window === 'undefined') return false;
+    return ['localhost', '127.0.0.1'].includes(window.location.hostname);
+  }, []);
 
   // Redirect if already logged in
   useEffect(() => {
@@ -36,7 +65,7 @@ export default function LoginPage() {
       await signInWithPopup(auth, googleProvider);
     } catch (err: any) {
       console.error('[Auth] Google sign-in failed:', err);
-      setError('ההתחברות עם Google נכשלה. נסה שנית.');
+      setError(getAuthErrorMessage(err, hostLabel));
       setIsSubmitting(false);
     }
   };
@@ -69,8 +98,26 @@ export default function LoginPage() {
           </CardHeader>
           <CardContent className="p-8 space-y-4">
             {error && (
-              <div className="bg-destructive/10 text-destructive text-sm p-3 rounded-xl text-center">
-                {error}
+              <div className="rounded-xl border border-destructive/20 bg-destructive/10 p-3 text-sm text-destructive">
+                <div className="flex items-start gap-2 text-right" dir="rtl">
+                  <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+                  <span>{error}</span>
+                </div>
+              </div>
+            )}
+
+            {isLocalHost && (
+              <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-right" dir="rtl">
+                <div className="mb-2 flex items-center justify-between gap-2">
+                  <Badge variant="outline" className="border-amber-300 bg-white text-amber-800">
+                    פיתוח מקומי
+                  </Badge>
+                </div>
+                <p className="text-sm leading-6 text-amber-900">
+                  אם התחברות Google נכשלת עם <span className="font-semibold">auth/unauthorized-domain</span>,
+                  יש להוסיף את <span className="font-semibold">{hostLabel}</span> לרשימת
+                  <span className="font-semibold"> Authorized domains</span> ב-Firebase Authentication.
+                </p>
               </div>
             )}
 

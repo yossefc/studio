@@ -17,7 +17,7 @@ const TalmudAISummaryInputSchema = z.object({
 export type TalmudAISummaryInput = z.infer<typeof TalmudAISummaryInputSchema>;
 
 const TalmudAISummaryOutputSchema = z.object({
-  summary: z.string().describe('Concise, bullet-point summary in Hebrew.'),
+  summary: z.string().describe('Concise, structured summary in Hebrew.'),
   modelUsed: z.string(),
   validated: z.boolean().default(true),
   validationErrors: z.array(z.string()).optional(),
@@ -41,136 +41,90 @@ function validateSummary(text: string, isTorahOhr: boolean = false): { valid: bo
 
   const bulletRegex = /^\s*(?:[-*]|\u2022|\d+\.)\s+/m;
   if (!bulletRegex.test(text)) {
-    errors.push('הסיכום חייב להיות בפורמט נקודות.');
-  }
-  if (!isTorahOhr && !/\(מקור ההלכה:\s*[^)]+\)/u.test(text) && !/\([^)]+\)/u.test(text)) {
-    // We check for some sort of source format at the end of the text.
-    // The new prompt uses (לדוגמה: "... (רמב"ם)") so we check for parentheses.
-    errors.push('חסר פורמט "(שם הפוסק/המקור)" בסוף ההלכה כנדרש בסיכום.');
+    errors.push('הסיכום חייב לכלול נקודות מסודרות.');
   }
 
   if (!isTorahOhr && /הכרעה למעשה/u.test(text)) {
-    errors.push('אין לכלול את הביטוי "הכרעה למעשה" בסיכום.');
+    errors.push('אין לכתוב את הביטוי "הכרעה למעשה" בסיכום.');
   }
 
   if (/מקור לא צוין/u.test(text)) {
-    errors.push('אין לכתוב "(מקור לא צוין)" בסיכום.');
+    errors.push('אין לכתוב "מקור לא צוין" בסיכום.');
   }
 
   return { valid: errors.length === 0, errors };
 }
 
-function buildHalakhicSummaryStructure(sources: string[]): string {
-  const sections: string[] = [];
 
-  if (sources.includes('tur')) {
-    sections.push(`## דברי הטור
-- סכם בקצרה את יסוד הדין, ההגדרה, והכיוון המעשי של הטור (טור).`);
-  }
-
-  if (sources.includes('beit_yosef')) {
-    sections.push(`## שיטות הבית יוסף
-- סדר את הדעות המרכזיות בקצרה, עם קיבוץ דעות דומות לאותו מהלך (בית יוסף).
-- אם אין מחלוקת ממשית, כתוב זאת במפורש בשורה קצרה (בית יוסף).`);
-  }
-
-  if (sources.includes('shulchan_arukh')) {
-    sections.push(`## פסק השולחן ערוך
-- כתוב את ההכרעה של השולחן ערוך בצורה ברורה, קצרה ומעשית (שולחן ערוך).`);
-  }
-
-  if (sources.includes('mishnah_berurah')) {
-    sections.push(`## חידושי המשנה ברורה
-- ציין בקצרה את ההוספות המעשיות, החילוקים וההסתייגויות של המשנה ברורה (משנה ברורה).`);
-  }
-
-  sections.push(`## סיכום והכרעה
-- כתוב את השורה התחתונה למעשה, וציין בקצרה מי מחמיר, מי מקל, ומה נפסק (סיכום).`);
-
-  return sections.join('\n\n');
-}
-
-function getStyleRules(isTorahOhr: boolean): string {
+function getStyleRules(isTorahOhr: boolean, hasMb: boolean = false): string {
   if (isTorahOhr) {
-    return `You are writing a concise summary of spiritual concepts from Torah Ohr (Hassidut).
-Output language: Hebrew only.
+    return `אתה כותב סיכום קצר של מושגים רוחניים מתוך תורה אור.
+ענה בעברית בלבד.
 
-Mandatory format (repeat per topic):
-## <כותרת נושא רוחני קצרה>
-- מושג: הסבר קצר של המושג (עד ~18 מילים).
-- משמעות: מה המשמעות הרוחנית או העבודה הפנימית הנדרשת בקצרה.
+מבנה מחייב:
+## <כותרת קצרה>
+- מושג: הסבר קצר של המושג.
+- משמעות: מה הנקודה הפנימית או העבודה העולה ממנו.
 - תמצית: שורת סיכום קצרה.
 
-Strict constraints:
-1) Keep it short, focused on spiritual growth and Kabbalistic/Hassidic concepts.
-2) No repetition between lines or topics.
-3) No intro or outro text.
-4) Prefer exactly 3 lines per topic (מושג, משמעות, תמצית).
-5) Maximum 6 topics total.`;
+כללים:
+1. היה קצר, מדויק, וללא חזרות.
+2. אין פתיחה ואין סיום.
+3. עדיף שלוש שורות לכל נושא.
+4. עד שישה נושאים לכל היותר.`;
   }
 
-  return `You are writing a concise Rabanut exam summary.
-Output language: Hebrew only.
+  const mbOpinionsLine = hasMb
+    ? `- דעות המשנה ברורה: פרט כל פוסק המוזכר במשנה ברורה לנושא זה – שמו ודינו בקצרה (כולל ביאור הלכה, שיטת הרא"ש ואחרונים שמוזכרים).
+`
+    : '';
 
-Mandatory format (repeat per topic):
-## <כותרת נושא קצרה>
-- נושא: משפט אחד קצר וברור (עד ~18 מילים).
-- דעות: רק עיקרי הדעות בקיצור. אם כמה פוסקים באותה דעה, לקבץ באותה שורה עם כל השמות יחד.
-- הלכה: שורה אחת ברורה וקצרה, ובסופה מקור בסוגריים.
+  return `אתה כותב סיכום לבחינת רבנות, מסודר לפי נושאים.
+ענה בעברית בלבד.
 
-Strict constraints:
-1) Keep it short and practical. No long explanations.
-2) No repetition between lines or topics.
-3) Do not write "(מקור לא צוין)".
-4) Do not write "הכרעה למעשה".
-5) No intro or outro text.
-6) Prefer 3 lines per topic exactly (נושא, דעות, הלכה).
-7) If there is no real מחלוקת, write in "דעות" that there is no practical dispute in one short line.
-8) Maximum 6 topics total.`;
+מבנה מחייב — לכל נושא שעולה מהסעיף:
+## <שם הנושא>
+- נושא: משפט אחד קצר המגדיר את הנושא.
+- דעות: עיקרי הדעות (ראשונים ואחרונים), מקובצות לפי שיטה. אם אין מחלוקת, כתוב זאת.
+${mbOpinionsLine}- הלכה: פסיקת השולחן ערוך בשורה אחת ברורה ומעשית.
+- רב עובדיה יוסף: פסיקתו של הרב עובדיה יוסף זצ"ל בנושא זה. אם לא ידועה הכרעה ספציפית, כתוב "אין הכרעה ידועה בנושא זה".
+
+כללים:
+1. צור כותרת נפרדת לכל דין עצמאי שעולה מהסעיף.
+2. היה קצר, ממוקד, וללא חזרות.
+3. אין פתיחה ואין סיום.
+4. אל תכתוב "הכרעה למעשה".
+5. עד שישה נושאים לכל היותר.`;
 }
 
 function getStructuredStyleRules(sources: string[], isTorahOhr: boolean): string {
   if (isTorahOhr) {
-    return getStyleRules(true);
+    return getStyleRules(true, false);
   }
 
-  return `You are writing a concise metivta-style Rabanut exam summary.
-Output language: Hebrew only.
-
-Mandatory structure:
-${buildHalakhicSummaryStructure(sources)}
-
-Strict constraints:
-1) Keep it short, structured, and practical. No long explanations.
-2) Group similar views together instead of repeating them.
-3) If there is no real מחלוקת, say so explicitly in one short bullet.
-4) Do not write "(מקור לא צוין)".
-5) Do not write "הכרעה למעשה".
-6) No intro or outro text.
-7) Keep the order of the sections exactly as requested.
-8) End with a short bottom line in the section "סיכום והכרעה".`;
+  const hasMb = sources.includes('mishnah_berurah');
+  // For all halachic sources: topic-based summary with Rav Ovadia's opinion
+  return getStyleRules(false, hasMb);
 }
 
 function buildSummaryPrompt(studyGuideText: string, sources: string[]) {
   const isTorahOhr = sources.includes('torah_ohr');
   return `${getStructuredStyleRules(sources, isTorahOhr)}
 
-Included sources: ${sources.join(', ')}
+מקורות שנכללו:
+${sources.join(', ')}
 
-Study guide text:
+דף הלימוד:
 ${studyGuideText}
 
-Now produce the summary in the required format.`;
+כתוב עכשיו את הסיכום במבנה הנדרש בלבד.`;
 }
-/**
- * Strip any AI meta-commentary preamble from the beginning of the summary.
- * We remove lines that start with known meta-phrases until we hit real content.
- */
+
 function stripMetaPrefix(text: string): string {
   const META_PATTERNS = [
     /^(בטח|הנה|להלן|כפי שביקשת)/,
     /סיכום מתוקן/,
-    /מנוסח מחדש/,
+    /נוסח מחדש/,
     /בעברית תקינה/,
     /בפורמט של נקודות/,
     /הנה הסיכום/,
@@ -181,10 +135,12 @@ function stripMetaPrefix(text: string): string {
   const lines = text.split('\n');
   let startIdx = 0;
 
-  // Skip leading meta-commentary lines
   for (let i = 0; i < Math.min(lines.length, 5); i++) {
     const trimmed = lines[i].trim();
-    if (!trimmed) { startIdx = i + 1; continue; }
+    if (!trimmed) {
+      startIdx = i + 1;
+      continue;
+    }
     const isMeta = META_PATTERNS.some(p => p.test(trimmed));
     if (isMeta) {
       startIdx = i + 1;
@@ -207,14 +163,12 @@ function normalizeSummaryFormat(text: string): string {
   const output: string[] = [];
 
   for (const line of lines) {
-    // If it's a heading for a topic, just push it
     if (/^#/.test(line)) {
       output.push('');
       output.push(line);
       continue;
     }
 
-    // Keep bullet lines concise; do not auto-insert "(מקור לא צוין)".
     const bulletRegex = /^(?:[-*]|\u2022|\d+\.)\s+(.+)$/u;
     const bulletMatch = line.match(bulletRegex);
 
@@ -256,14 +210,14 @@ export const talmudAISummaryFlow = ai.defineFlow(
     let validation = validateSummary(summary, isTorahOhr);
 
     if (!validation.valid) {
-      const repairPrompt = `The summary is invalid: ${validation.errors.join(', ')}.
-Rewrite it using the exact same information but following these strict rules:
+      const repairPrompt = `הסיכום הבא אינו תקין: ${validation.errors.join(', ')}.
+כתוב אותו מחדש לפי הכללים הבאים:
 ${getStructuredStyleRules(input.sources, isTorahOhr)}
 
-Invalid summary:
+סיכום לתיקון:
 ${summary}
 
-Rewritten summary (Hebrew only):`;
+כתוב רק את הסיכום המתוקן בעברית:`;
 
       const repaired = await generateTextWithFallback({
         prompt: repairPrompt,

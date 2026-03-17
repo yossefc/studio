@@ -13,7 +13,8 @@ import type { SourceKey, SefariaResponse, FetchMode, StructuredChunk } from '@/l
 import { chunkStructuredText, type TextChunk } from '@/lib/chunker';
 import { explainTalmudSegment } from '@/ai/flows/talmud-ai-chatbot-explanation';
 import { summarizeTalmudStudyGuide } from '@/ai/flows/talmud-ai-summary';
-import { createStudyGuideDoc } from '@/lib/google-docs';
+import { generateRavOvadiaOpinion } from '@/ai/flows/rav-ovadia-opinion';
+import { createStudyGuideDoc, createAllGuidesDoc, createSummariesOnlyDoc } from '@/lib/google-docs';
 import { getOrBuildSimanAlignment } from './siman-alignment';
 import { getEffectiveModel } from '@/ai/genkit';
 import { logGenerationMetrics } from '@/lib/metrics';
@@ -50,6 +51,7 @@ export interface MultiSourceRequest {
   torahOhrPassagesOnly?: boolean;
   manualTurText?: string;
   manualByText?: string;
+  manualMbText?: string;
 }
 
 export interface GenerationResult {
@@ -67,7 +69,7 @@ export interface GenerationResult {
 }
 
 const CANONICAL_COLLECTION = 'canonicalStudyGuides';
-const CANONICAL_CACHE_VERSION = 'v7';
+const CANONICAL_CACHE_VERSION = 'v8';
 const CANONICAL_LOCK_STALE_MS = 10 * 60 * 1000;
 const CANONICAL_READY_WAIT_ATTEMPTS = 20;
 const CANONICAL_READY_WAIT_MS = 1500;
@@ -884,21 +886,33 @@ export async function generateMultiSourceStudyGuide(
 
     // 2. Fetch selected sources (Tur/Beit Yosef use linked-passages strategy).
     const sourceFetchPromises = request.sources
-      .filter(s => s !== 'mishnah_berurah') // MB is fetched as companion, not a standalone explanation source
+      .filter(s => s !== 'mishnah_berurah' && s !== 'rav_ovadia') // MB and Rav Ovadia are handled separately
       .map(sourceKey => fetchSourceWithStrategy(request, sourceKey));
 
     // Also fetch Mishnah Berurah if selected (as companion for SA).
+    // If manualMbText is provided, use it directly without a Sefaria fetch.
+    const hasMb = request.sources.includes('mishnah_berurah');
+    const mbSyntheticRef = `Mishnah Berurah (Saisie Manuelle) - ${request.section} ${request.siman}:${request.seif || ''}`.trim();
+
     let mbRef: string | undefined;
-    if (request.sources.includes('mishnah_berurah')) {
+    if (hasMb && !request.manualMbText?.trim()) {
       mbRef = buildSefariaRef('mishnah_berurah', request.section, request.siman, request.seif);
     }
 
-    const mbPromise = mbRef
-      ? fetchSefariaText(mbRef, 'he').catch((error) => {
-        console.warn('[Action] Mishnah Berurah fetch failed, proceeding without:', error);
-        return null;
-      })
-      : Promise.resolve(null);
+    const mbPromise = hasMb && request.manualMbText?.trim()
+      ? Promise.resolve({
+          ref: mbSyntheticRef,
+          he: [request.manualMbText.trim()],
+          segments: [{ ref: mbSyntheticRef, text: request.manualMbText.trim() }] as StructuredChunk[],
+          en: [],
+          direction: 'rtl' as const,
+        })
+      : mbRef
+        ? fetchSefariaText(mbRef, 'he').catch((error) => {
+            console.warn('[Action] Mishnah Berurah fetch failed, proceeding without:', error);
+            return null;
+          })
+        : Promise.resolve(null);
 
     const [fetchResults, mbData] = await Promise.all([
       Promise.allSettled(sourceFetchPromises),
@@ -1034,6 +1048,84 @@ export async function generateMultiSourceStudyGuide(
       return { success: false, cancelled: true };
     }
 
+    // Process Mishnah Berurah through AI explanation (style מתיבתא)
+    if (mbData && request.sources.includes('mishnah_berurah')) {
+      const mbSegments: StructuredChunk[] = Array.isArray(mbData.segments) && mbData.segments.length > 0
+        ? mbData.segments
+        : (Array.isArray(mbData.he) ? mbData.he : []).map((text, index) => ({
+            ref: mbData.ref,
+            path: [index],
+            text,
+          }));
+
+      if (mbSegments.length > 0) {
+        const mbRawChunks = chunkStructuredText(mbSegments, 'mishnah_berurah').slice(0, MAX_CHUNKS_PER_SOURCE);
+
+        const mbResult = await processSourceChunks(
+          mbRawChunks,
+          mbData.ref,
+          'mishnah_berurah',
+          modelToUse,
+          userId,
+          guideId,
+          undefined,
+          false,
+          reportProgress,
+        );
+
+        if (!mbResult.cancelled && mbResult.chunks.length > 0) {
+          totalCacheHits += mbResult.cacheHits;
+          sourceResults.push({
+            sourceKey: 'mishnah_berurah',
+            hebrewLabel: SOURCE_CONFIGS.mishnah_berurah.hebrewLabel,
+            tref: mbData.ref,
+            chunks: mbResult.chunks,
+          });
+        }
+      }
+    }
+
+        // Generate Rav Ovadia Yosef's opinion if requested (AI-generated, no Sefaria fetch)
+    if (request.sources.includes('rav_ovadia')) {
+      try {
+        const saResult = sourceResults.find(sr => sr.sourceKey === 'shulchan_arukh');
+        const saText = saResult?.chunks.map(c => c.rawText).join('\n') ?? '';
+        const mbText = companionText ?? '';
+
+        if (saText) {
+          const ravOvadiaResult = await generateRavOvadiaOpinion({
+            saText,
+            mbText: mbText || undefined,
+            section: request.section,
+            siman: request.siman,
+            seif: request.seif,
+            modelName: modelToUse,
+          });
+
+          const opinionText = ravOvadiaResult.opinion;
+          const ravOvadiaChunk: ProcessedChunk = {
+            id: 'rav_ovadia-0',
+            rawText: opinionText,
+            explanation: opinionText,
+            rawHash: createHash('sha256').update(opinionText).digest('hex'),
+            cacheHit: false,
+            orderIndex: 0,
+            modelUsed: ravOvadiaResult.modelUsed,
+            validated: true,
+          };
+
+          sourceResults.push({
+            sourceKey: 'rav_ovadia',
+            hebrewLabel: SOURCE_CONFIGS.rav_ovadia.hebrewLabel,
+            tref: `${request.section} ${request.siman}${request.seif ? `:${request.seif}` : ''}`,
+            chunks: [ravOvadiaChunk],
+          });
+        }
+      } catch (ravOvadiaError) {
+        console.warn('[Action] Failed to generate Rav Ovadia opinion:', ravOvadiaError);
+      }
+    }
+
     if (sourceResults.length === 0) {
       throw new Error('לא נמצא תוכן בכל המקורות שנבחרו.');
     }
@@ -1141,5 +1233,125 @@ export async function exportToGoogleDocs(
       success: false,
       error: 'יצירת מסמך Google Docs נכשלה. בדוק הרשאות גישה לשירות.',
     };
+  }
+}
+
+export async function exportSimanSummariesToGoogleDocs(
+  userId: string,
+  guideIds: string[],
+  simanLabel: string,
+): Promise<{ success: boolean; googleDocUrl?: string; error?: string }> {
+  try {
+    const db = getAdminDb();
+    const guidesRef = db.collection('users').doc(userId).collection('studyGuides');
+
+    const guideSummaries: Array<{ tref: string; summary: string; seifNum: number }> = [];
+
+    for (const guideId of guideIds) {
+      const guideSnap = await guidesRef.doc(guideId).get();
+      if (!guideSnap.exists) continue;
+      const data = guideSnap.data() as { tref: string; summaryText: string };
+      if (!data.summaryText?.trim()) continue;
+
+      const tref = data.tref || '';
+      const seifMatch = tref.match(/:(\d+)$/);
+      const seifNum = seifMatch ? parseInt(seifMatch[1]!, 10) : 0;
+
+      guideSummaries.push({ tref, summary: data.summaryText, seifNum });
+    }
+
+    if (guideSummaries.length === 0) {
+      return { success: false, error: 'לא נמצאו סיכומים לייצוא.' };
+    }
+
+    guideSummaries.sort((a, b) => a.seifNum - b.seifNum);
+
+    const date = new Date().toLocaleDateString('he-IL', { year: 'numeric', month: 'long', day: 'numeric' });
+    const docTitle = `סיכומי סימן ${simanLabel} – ${date}`;
+    const docData = await createSummariesOnlyDoc(
+      guideSummaries.map(({ tref, summary }) => ({ tref, summary })),
+      docTitle,
+    );
+
+    return { success: true, googleDocUrl: docData.url };
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    console.error('[GoogleDocs] exportSimanSummariesToGoogleDocs failed:', error);
+    return { success: false, error: `יצירת מסמך Google Docs נכשלה: ${detail}` };
+  }
+}
+
+export async function exportAllGuidesToGoogleDocs(
+  userId: string,
+  guideIds: string[],
+): Promise<{ success: boolean; googleDocUrl?: string; error?: string }> {
+  try {
+    const db = getAdminDb();
+    const guidesRef = db.collection('users').doc(userId).collection('studyGuides');
+
+    const guideDatas: Array<{ tref: string; summary: string; sourceResults: SourceResult[] }> = [];
+
+    for (const guideId of guideIds) {
+      const guideSnap = await guidesRef.doc(guideId).get();
+      if (!guideSnap.exists) continue;
+      const guideData = guideSnap.data() as { tref: string; summaryText: string; sources?: SourceKey[] };
+
+      const chunksSnap = await guidesRef
+        .doc(guideId)
+        .collection('textChunks')
+        .orderBy('orderIndex', 'asc')
+        .get();
+
+      const chunksBySource = new Map<string, ProcessedChunk[]>();
+      for (const chunkDoc of chunksSnap.docs) {
+        const c = chunkDoc.data() as {
+          sourceKey: string;
+          orderIndex: number;
+          rawText: string;
+          explanationText: string;
+        };
+        if (!chunksBySource.has(c.sourceKey)) chunksBySource.set(c.sourceKey, []);
+        chunksBySource.get(c.sourceKey)!.push({
+          id: chunkDoc.id,
+          rawText: c.rawText ?? '',
+          explanation: c.explanationText ?? '',
+          rawHash: '',
+          cacheHit: false,
+          orderIndex: c.orderIndex,
+        });
+      }
+
+      const sourceResults: SourceResult[] = SOURCE_PROCESSING_ORDER
+        .filter((key) => chunksBySource.has(key))
+        .map((key) => {
+          const config = SOURCE_CONFIGS[key];
+          return {
+            sourceKey: key,
+            hebrewLabel: config?.hebrewLabel ?? key,
+            tref: guideData.tref,
+            chunks: chunksBySource.get(key)!,
+          };
+        });
+
+      guideDatas.push({
+        tref: guideData.tref,
+        summary: guideData.summaryText ?? '',
+        sourceResults,
+      });
+    }
+
+    if (guideDatas.length === 0) {
+      return { success: false, error: 'לא נמצאו ביאורים לייצוא.' };
+    }
+
+    const date = new Date().toLocaleDateString('he-IL', { year: 'numeric', month: 'long', day: 'numeric' });
+    const docTitle = `כל הביאורים – ${date}`;
+    const docData = await createAllGuidesDoc(guideDatas, docTitle);
+
+    return { success: true, googleDocUrl: docData.url };
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    console.error('[GoogleDocs] exportAllGuidesToGoogleDocs failed:', error);
+    return { success: false, error: `יצירת מסמך Google Docs נכשלה: ${detail}` };
   }
 }

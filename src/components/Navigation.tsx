@@ -19,44 +19,44 @@ export function Navigation() {
 
   const links = [
     { href: '/', label: 'ראשי', icon: BookOpen },
-    { href: '/generate', label: 'צור מדריך', icon: PlusCircle },
-    { href: '/my-guides', label: 'המדריכים שלי', icon: History },
+    { href: '/generate', label: 'בניית דף', icon: PlusCircle },
+    { href: '/my-guides', label: 'הביאורים שלי', icon: History },
   ];
 
   return (
-    <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-border py-2 px-6 flex justify-around items-center z-50 md:top-0 md:bottom-auto md:justify-start md:gap-8 print:hidden">
-      <div className="hidden md:block font-headline text-primary text-xl font-bold ml-8">TalmudAI</div>
+    <nav className="fixed bottom-0 left-0 right-0 z-50 flex items-center justify-around border-t border-border bg-white px-6 py-2 md:top-0 md:bottom-auto md:justify-start md:gap-8 print:hidden">
+      <div className="ml-8 hidden text-xl font-bold font-headline text-primary md:block">Talmud</div>
 
       {links.map(({ href, label, icon: Icon }) => (
         <Link
           key={href}
           href={href}
           className={cn(
-            "flex flex-col items-center gap-1 text-xs font-medium transition-colors md:flex-row md:text-sm md:gap-2 px-3 py-1 rounded-md",
-            pathname === href ? "text-primary bg-primary/5" : "text-muted-foreground hover:text-foreground"
+            'flex flex-col items-center gap-1 rounded-md px-3 py-1 text-xs font-medium transition-colors md:flex-row md:gap-2 md:text-sm',
+            pathname === href ? 'bg-primary/5 text-primary' : 'text-muted-foreground hover:text-foreground',
           )}
         >
-          <Icon className="w-5 h-5" />
+          <Icon className="h-5 w-5" />
           <span>{label}</span>
         </Link>
       ))}
 
-      <div className="flex items-center gap-4 mr-auto">
+      <div className="mr-auto flex items-center gap-4">
         {user ? (
           <div className="flex items-center gap-4">
-            <div className="hidden md:flex items-center gap-2 text-sm text-muted-foreground">
-              <UserIcon className="w-4 h-4" />
+            <div className="hidden items-center gap-2 text-sm text-muted-foreground md:flex">
+              <UserIcon className="h-4 w-4" />
               <span>{user.email || 'משתמש אנונימי'}</span>
             </div>
-            <Button variant="ghost" size="sm" onClick={handleLogout} className="text-muted-foreground hover:text-destructive gap-2">
-              <LogOut className="w-4 h-4" />
+            <Button variant="ghost" size="sm" onClick={handleLogout} className="gap-2 text-muted-foreground hover:text-destructive">
+              <LogOut className="h-4 w-4" />
               <span className="hidden md:inline">התנתק</span>
             </Button>
           </div>
         ) : (
           <Button asChild variant="default" size="sm" className="rounded-lg">
             <Link href="/login" className="gap-2">
-              <UserIcon className="w-4 h-4" />
+              <UserIcon className="h-4 w-4" />
               <span>התחברות</span>
             </Link>
           </Button>

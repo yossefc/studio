@@ -98,6 +98,80 @@ export async function getSeifOptions(section: string, siman: number | string): P
 }
 
 /**
+ * Fetches siman subjects (topic titles) for a given section from the Sefaria index API.
+ * Returns a map of siman number -> Hebrew subject title.
+ */
+export async function getSimanSubjects(section: string): Promise<Record<number, string>> {
+    const bookTitle = SEFARIA_SECTION_MAP[section];
+    if (!bookTitle) return {};
+
+    const url = `https://www.sefaria.org/api/v2/index/${encodeURIComponent(bookTitle)}`;
+
+    try {
+        const response = await fetch(url, { next: { revalidate: 86400 } });
+        if (!response.ok) return {};
+
+        const data = await response.json();
+        const subjects: Record<number, string> = {};
+
+        // Try alt_structs for topic-based structure (e.g. "Hilkhot", "Topics")
+        const altStructs = data?.alt_structs;
+        if (altStructs && typeof altStructs === 'object') {
+            const structKey = Object.keys(altStructs)[0];
+            const struct = structKey ? altStructs[structKey] : null;
+            const nodes: unknown[] = Array.isArray(struct?.nodes) ? struct.nodes : [];
+
+            for (const node of nodes) {
+                if (!node || typeof node !== 'object') continue;
+                const n = node as Record<string, unknown>;
+
+                const heTitle = typeof n.heTitle === 'string'
+                    ? n.heTitle
+                    : (Array.isArray(n.titles)
+                        ? (n.titles as Array<{ lang: string; text: string }>)
+                            .find(t => t.lang === 'he')?.text
+                        : undefined);
+
+                if (!heTitle) continue;
+
+                // Try wholeRef first (e.g. "Shulchan Arukh, Orach Chayim 1-8")
+                const rangeRef = typeof n.wholeRef === 'string' ? n.wholeRef : null;
+                if (rangeRef) {
+                    const match = rangeRef.match(/(\d+)(?:-(\d+))?$/);
+                    if (match) {
+                        const from = parseInt(match[1]!, 10);
+                        const to = match[2] ? parseInt(match[2], 10) : from;
+                        for (let i = from; i <= to; i++) {
+                            if (!subjects[i]) subjects[i] = heTitle;
+                        }
+                        continue;
+                    }
+                }
+
+                // Fall back to refs array
+                const refs = Array.isArray(n.refs) ? (n.refs as unknown[]) : [];
+                for (const ref of refs) {
+                    const refStr = typeof ref === 'string' ? ref : null;
+                    if (!refStr) continue;
+                    const match = refStr.match(/(\d+)(?:-(\d+))?$/);
+                    if (match) {
+                        const from = parseInt(match[1]!, 10);
+                        const to = match[2] ? parseInt(match[2], 10) : from;
+                        for (let i = from; i <= to; i++) {
+                            if (!subjects[i]) subjects[i] = heTitle;
+                        }
+                    }
+                }
+            }
+        }
+
+        return subjects;
+    } catch {
+        return {};
+    }
+}
+
+/**
  * Fetches the Parashot nodes for Torah Ohr.
  */
 async function getTorahOhrParashot(): Promise<SimanOption[]> {

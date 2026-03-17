@@ -1,0 +1,167 @@
+
+> nextn@0.1.0 dev
+> next dev -p 9002
+
+   ▲ Next.js 15.5.9
+   - Local:        http://localhost:9002
+   - Network:      http://192.168.150.190:9002
+   - Environments: .env
+
+ ✓ Starting...
+ ✓ Ready in 1810ms
+ ○ Compiling / ...
+ ✓ Compiled / in 1771ms (903 modules)
+ GET / 200 in 2539ms
+ ✓ Compiled in 215ms (286 modules)
+ ✓ Compiled /favicon.ico in 368ms (634 modules)
+ GET /favicon.ico 200 in 489ms
+ ○ Compiling /my-guides ...
+ ✓ Compiled /my-guides in 557ms (943 modules)
+ GET /my-guides 200 in 903ms
+ ⚠ Cross origin request detected from 127.0.0.1 to /_next/* resource. In a future major version of Next.js, you will need to explicitly configure "allowedDevOrigins" in next.config to allow this.
+Read more: https://nextjs.org/docs/app/api-reference/config/next-config-js/allowedDevOrigins
+ ✓ Compiled /login in 267ms (954 modules)
+ GET /login 200 in 358ms
+ ○ Compiling /generate ...
+ ✓ Compiled /generate in 9.5s (3287 modules)
+ GET /generate 200 in 10182ms
+ POST /generate 200 in 4947ms
+ POST /generate 200 in 397ms
+ POST /generate 200 in 23ms
+ POST /generate 200 in 33ms
+ ✓ Compiled in 1124ms (3263 modules)
+ POST /generate 200 in 1428ms
+ GET /generate 200 in 46ms
+ GET /my-guides 200 in 37ms
+ GET /login 200 in 42ms
+ ○ Compiling / ...
+ ✓ Compiled / in 836ms (2868 modules)
+ GET / 200 in 1066ms
+ GET /generate 200 in 63ms
+ GET /login 200 in 51ms
+ GET /login 200 in 41ms
+ POST /generate 200 in 1929ms
+ POST /login 200 in 1983ms
+ ✓ Compiled in 1146ms (3284 modules)
+ POST /generate 200 in 1191ms
+ POST /login 200 in 2401ms
+ POST /generate 200 in 23ms
+ POST /login 200 in 43ms
+ POST /generate 200 in 22ms
+ POST /login 200 in 41ms
+ POST /generate 200 in 17ms
+ POST /login 200 in 44ms
+ GET /login 200 in 47ms
+ GET /login 200 in 427ms
+ ○ Compiling /favicon.ico ...
+ ✓ Compiled /favicon.ico in 813ms (2885 modules)
+ GET /favicon.ico 200 in 979ms
+ GET /generate 200 in 137ms
+ POST /generate 200 in 1050ms
+ POST /generate 200 in 25ms
+ POST /generate 200 in 29ms
+ POST /generate 200 in 30ms
+ GET /my-guides 200 in 52ms
+ ✓ Compiled in 2.9s (3284 modules)
+ GET /my-guides 200 in 143ms
+ GET /generate 200 in 54ms
+ POST /generate 200 in 1946ms
+ POST /generate 200 in 34ms
+ POST /generate 200 in 24ms
+ POST /generate 200 in 22ms
+ POST /generate 200 in 376ms
+ ✓ Compiled in 743ms (3284 modules)
+ GET /generate 200 in 114ms
+ POST /generate 200 in 1402ms
+ ✓ Compiled in 994ms (3284 modules)
+ POST /generate 200 in 1631ms
+ GET /generate 200 in 39ms
+[Firebase-Admin] Using service account for project "rabbinat-app".
+[Action] tur: using manual text input (1 words)
+[Action] beit_yosef: using manual text input (1 words)
+[Action] tur: using linked passages (1 structured segments).
+[Action] beit_yosef: using linked passages (1 structured segments).
+[Flow-Exec] Completed {
+  tref: 'Tur (Saisie Manuelle) - Orach Chayim 430:1',
+  chunkOrder: 0,
+  modelUsed: 'googleai/gemini-2.5-pro',
+  durationMs: 32882,
+  cacheHit: false
+}
+[Flow-Exec] Completed {
+  tref: 'Beit Yosef (Saisie Manuelle) - Orach Chayim 430:1',
+  chunkOrder: 0,
+  modelUsed: 'googleai/gemini-2.5-pro',
+  durationMs: 35354,
+  cacheHit: false
+}
+[Flow-Exec] Completed {
+  tref: 'Shulchan Arukh, Orach Chayim 430:1',
+  chunkOrder: 0,
+  modelUsed: 'googleai/gemini-2.5-pro',
+  durationMs: 36880,
+  cacheHit: false
+}
+[TalmudAI-Metrics] {
+  modelName: 'googleai/gemini-2.5-pro',
+  chunkCount: 3,
+  durationMs: 60014,
+  cacheHits: 0,
+  estimatedCostUsd: '0.037500',
+  avgMsPerChunk: '20005'
+}
+ POST /generate 200 in 61150ms
+ ✓ Compiled in 2.9s (3284 modules)
+(node:4672) MaxListenersExceededWarning: Possible EventEmitter memory leak detected. 11 SIGTERM listeners added to [process]. MaxListeners is 10. Use emitter.setMaxListeners() to increase limit
+(Use `node --trace-warnings ...` to show where the warning was created)
+ POST /generate 200 in 3662ms
+ GET /generate 200 in 46ms
+ ✓ Compiled in 3.3s (3284 modules)
+ GET /generate 200 in 212ms
+ ✓ Compiled in 675ms (3284 modules)
+(node:4672) MaxListenersExceededWarning: Possible EventEmitter memory leak detected. 11 SIGINT listeners added to [process]. MaxListeners is 10. Use emitter.setMaxListeners() to increase limit
+ POST /generate 200 in 2014ms
+ GET /generate 200 in 53ms
+ ✓ Compiled in 688ms (3284 modules)
+ POST /generate 200 in 1581ms
+ GET /generate 200 in 35ms
+ ✓ Compiled in 732ms (3284 modules)
+ GET /generate 200 in 80ms
+ POST /generate 200 in 575ms
+ GET /generate 200 in 423ms
+ ○ Compiling /favicon.ico ...
+ ✓ Compiled /favicon.ico in 811ms (2885 modules)
+ GET /favicon.ico 200 in 1224ms
+ POST /generate 200 in 1902ms
+ POST /generate 200 in 24ms
+ ✓ Compiled in 1712ms (3284 modules)
+ POST /generate 200 in 1106ms
+ GET /generate 200 in 41ms
+ ✓ Compiled in 621ms (3284 modules)
+ POST /generate 200 in 652ms
+ GET /generate 200 in 36ms
+ ✓ Compiled in 839ms (3284 modules)
+ POST /generate 200 in 673ms
+ GET /generate 200 in 38ms
+ GET /my-guides 200 in 50ms
+ ✓ Compiled in 1444ms (3284 modules)
+ GET /my-guides 200 in 87ms
+ GET /generate 200 in 51ms
+ POST /generate 200 in 698ms
+ POST /generate 200 in 20ms
+ POST /generate 200 in 26ms
+ POST /generate 200 in 21ms
+ ✓ Compiled in 949ms (3284 modules)
+ POST /generate 200 in 1188ms
+ GET /generate 200 in 47ms
+ ✓ Compiled in 1804ms (3284 modules)
+ POST /generate 200 in 2275ms
+ GET /generate 200 in 53ms
+ ✓ Compiled in 713ms (3284 modules)
+ POST /generate 200 in 971ms
+ GET /generate 200 in 37ms
+ ✓ Compiled in 1157ms (3284 modules)
+ GET /generate 200 in 185ms
+ ✓ Compiled in 3.1s (2868 modules)
+ ✓ Compiled in 878ms (2868 modules)
+ ✓ Compiled in 456ms (2868 modules)

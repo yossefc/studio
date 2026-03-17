@@ -8,14 +8,14 @@ export default function Home() {
   return (
     <div className="flex flex-col min-h-screen bg-background">
       <Navigation />
-      
+
       <main className="flex-grow pt-24 pb-32 px-6 max-w-4xl mx-auto w-full">
         <section className="text-center mb-16 space-y-6">
           <h1 className="text-4xl md:text-6xl font-headline text-primary leading-tight">
             הפוך את הלימוד שלך <br /> <span className="text-accent">למדריך הלכתי מעשי</span>
           </h1>
           <p className="text-lg md:text-xl text-muted-foreground max-w-2xl mx-auto">
-            TalmudAI משתמש בבינה מלאכותית מתקדמת כדי לנתח טקסטים תורניים, להסביר אותם בהקשרם ולסכם את המסקנות ההלכתיות למבחני הרבנות.
+            Talmud משתמש בבינה מלאכותית מתקדמת כדי לנתח טקסטים תורניים, להסביר אותם בהקשרם ולסכם את המסקנות ההלכתיות למבחני הרבנות.
           </p>
           <div className="flex justify-center gap-4 pt-4">
             <Button asChild size="lg" className="bg-primary hover:bg-primary/90 text-white px-8 h-14 rounded-xl text-lg">
@@ -28,17 +28,17 @@ export default function Home() {
         </section>
 
         <section className="grid md:grid-cols-3 gap-8 mt-12">
-          <FeatureCard 
+          <FeatureCard
             icon={<Sparkles className="text-accent" />}
             title="ניתוח חכם"
             description="חלוקה למקטעים קצרים וקריאים עם הסבר ממוקד לכל קטע."
           />
-          <FeatureCard 
+          <FeatureCard
             icon={<BookCheck className="text-primary" />}
             title="סיכום הלכתי"
             description="התמקדות ב'הלכה למעשה' המותאמת לדרישות מבחני הסמיכה."
           />
-          <FeatureCard 
+          <FeatureCard
             icon={<ShieldCheck className="text-green-600" />}
             title="אינטגרציה עם Docs"
             description="ייצוא אוטומטי למסמכי Google Docs מעוצבים ומוכנים להדפסה."

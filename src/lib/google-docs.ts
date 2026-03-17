@@ -42,8 +42,12 @@ const SOURCE_PALETTE: Record<SourceResult['sourceKey'], { accent: typeof COLOR_P
     softBg: { red: 229 / 255, green: 240 / 255, blue: 247 / 255 },       // #E5F7F0
   },
   torah_ohr: {
-    accent: { red: 138 / 255, green: 90 / 255, blue: 25 / 255 },         // #8A5A19 
+    accent: { red: 138 / 255, green: 90 / 255, blue: 25 / 255 },         // #8A5A19
     softBg: { red: 242 / 255, green: 229 / 255, blue: 213 / 255 },       // #F2E5D5
+  },
+  rav_ovadia: {
+    accent: { red: 109 / 255, green: 40 / 255, blue: 217 / 255 },        // #6D28D9
+    softBg: { red: 245 / 255, green: 243 / 255, blue: 255 / 255 },       // #F5F3FF
   },
 };
 
@@ -98,9 +102,21 @@ function extractBoldRanges(
   return { cleanText, ranges };
 }
 
+/**
+ * Strips characters that Google Docs API silently drops during insertText,
+ * which would cause our cursor to be ahead of the actual document positions.
+ * Removes: \r (standalone or part of \r\n), form feeds, and other ASCII control chars.
+ * Keeps: \n (newline) and \t (tab).
+ */
+function sanitizeForInsert(text: string): string {
+  return text
+    .replace(/\r\n/g, '\n')     // Windows line endings → Unix
+    .replace(/[\r\x0C]/g, '')   // Carriage return (\r) and form feed (\f = \x0C)
+    .replace(/[\x00-\x08\x0B\x0E-\x1F\x7F]/g, ''); // Other ASCII control chars (keep \t=\x09, \n=\x0A)
+}
+
 function normalizeForDoc(text: string, collapseLineBreaks = false): string {
-  const normalized = text
-    .replace(/\r\n/g, '\n')
+  const normalized = sanitizeForInsert(text)
     .replace(/[ \t]+\n/g, '\n')
     .replace(/\n{3,}/g, '\n\n')
     .trim();
@@ -194,19 +210,21 @@ export async function createStudyGuideDoc(
   const summaryParagraphs: { start: number; end: number }[] = [];
 
   const appendPlain = (text: string) => {
-    fullContent += text;
-    cursor += text.length;
+    const safe = sanitizeForInsert(text);
+    fullContent += safe;
+    cursor += safe.length;
   };
 
   const appendStyled = (text: string, style: StyledRange['style'], sourceKey?: SourceResult['sourceKey']) => {
+    const safe = sanitizeForInsert(text);
     const start = cursor;
-    fullContent += text;
-    cursor += text.length;
+    fullContent += safe;
+    cursor += safe.length;
     styledRanges.push({ start, end: cursor, style, sourceKey });
   };
 
   const appendBoldAware = (text: string, sourceKey?: SourceResult['sourceKey']) => {
-    const { cleanText, ranges } = extractBoldRanges(text, cursor, sourceKey);
+    const { cleanText, ranges } = extractBoldRanges(sanitizeForInsert(text), cursor, sourceKey);
     fullContent += cleanText;
     cursor += cleanText.length;
     styledRanges.push(...ranges);
@@ -491,4 +509,465 @@ export async function createStudyGuideDoc(
     id: documentId,
     url: `https://docs.google.com/document/d/${documentId}/edit`,
   };
+}
+
+/**
+ * Creates a single Google Doc containing all provided study guides, one per section.
+ */
+export async function createAllGuidesDoc(
+  guides: Array<{ tref: string; summary: string; sourceResults: SourceResult[] }>,
+  docTitle: string,
+): Promise<{ id: string; url: string }> {
+  const clientId = process.env.GOOGLE_OAUTH_CLIENT_ID;
+  const clientSecret = process.env.GOOGLE_OAUTH_CLIENT_SECRET;
+  const refreshToken = process.env.GOOGLE_OAUTH_REFRESH_TOKEN;
+
+  if (!clientId || !clientSecret || !refreshToken) {
+    throw new Error('[GoogleDocs] Missing OAuth credentials in env.');
+  }
+
+  const auth = new google.auth.OAuth2(clientId, clientSecret);
+  auth.setCredentials({ refresh_token: refreshToken });
+
+  const docs = google.docs({ version: 'v1', auth });
+  const drive = google.drive({ version: 'v3', auth });
+
+  const createResponse = await drive.files.create({
+    requestBody: {
+      name: docTitle,
+      mimeType: 'application/vnd.google-apps.document',
+    },
+    fields: 'id',
+  });
+
+  const documentId = createResponse.data.id;
+  if (!documentId) throw new Error('Google Drive API did not return a file ID.');
+
+  const styledRanges: StyledRange[] = [];
+  let fullContent = '';
+  let cursor = 1;
+
+  const sourceParagraphs: { start: number; end: number; sourceKey: SourceResult['sourceKey'] }[] = [];
+  const summaryParagraphs: { start: number; end: number }[] = [];
+
+  const appendPlain = (text: string) => {
+    const safe = sanitizeForInsert(text);
+    fullContent += safe;
+    cursor += safe.length;
+  };
+
+  const appendStyled = (text: string, style: StyledRange['style'], sourceKey?: SourceResult['sourceKey']) => {
+    const safe = sanitizeForInsert(text);
+    const start = cursor;
+    fullContent += safe;
+    cursor += safe.length;
+    styledRanges.push({ start, end: cursor, style, sourceKey });
+  };
+
+  const appendBoldAware = (text: string, sourceKey?: SourceResult['sourceKey']) => {
+    const { cleanText, ranges } = extractBoldRanges(sanitizeForInsert(text), cursor, sourceKey);
+    fullContent += cleanText;
+    cursor += cleanText.length;
+    styledRanges.push(...ranges);
+  };
+
+  // Doc-level title
+  appendStyled(`${docTitle}\n`, 'title');
+  appendPlain('\n');
+
+  for (let gi = 0; gi < guides.length; gi++) {
+    const { tref, summary, sourceResults } = guides[gi]!;
+
+    // Guide title
+    appendStyled(`ביאור הלכתי: ${tref}\n`, 'sectionHeader');
+    appendStyled('====================\n', 'separator');
+
+    const sections = sourceResults.filter((sr) => sr.chunks.length > 0);
+
+    sections.forEach((sr, sourceIndex) => {
+      appendStyled(`${sr.hebrewLabel}\n`, 'sectionHeader', sr.sourceKey);
+      appendStyled('--------------------\n', 'separator', sr.sourceKey);
+
+      sr.chunks.forEach((chunk, chunkIndex) => {
+        const compactRaw = normalizeForDoc(chunk.rawText, true);
+        const compactExplanation = normalizeForDoc(chunk.explanation);
+
+        if (sr.sourceKey !== 'torah_ohr') {
+          const sourceStart = cursor;
+          appendStyled('מקור: ', 'sourceLabel', sr.sourceKey);
+          appendPlain(`${compactRaw}\n`);
+          sourceParagraphs.push({ start: sourceStart, end: cursor, sourceKey: sr.sourceKey });
+        }
+
+        appendBoldAware(`${compactExplanation}\n`, sr.sourceKey);
+
+        if (chunkIndex < sr.chunks.length - 1) appendPlain('\n');
+      });
+
+      if (sourceIndex < sections.length - 1) appendPlain('\n\n');
+    });
+
+    // Summary
+    appendPlain('\n');
+    appendStyled('סיכום הלכה למעשה\n', 'summaryHeader');
+    appendStyled('--------------------\n', 'separator');
+    const compactSummary = structureSummaryForDoc(summary);
+    if (compactSummary) {
+      const summaryStart = cursor;
+      appendBoldAware(`${compactSummary}\n`);
+      summaryParagraphs.push({ start: summaryStart, end: cursor });
+    } else {
+      appendPlain('לא הופק סיכום.\n');
+    }
+
+    // Separator between guides (not after last)
+    if (gi < guides.length - 1) {
+      appendPlain('\n\n');
+    }
+  }
+
+  if (cursor <= 1) {
+    return { id: documentId, url: `https://docs.google.com/document/d/${documentId}/edit` };
+  }
+
+  const requests: docs_v1.Schema$Request[] = [
+    { insertText: { location: { index: 1 }, text: fullContent } },
+  ];
+
+  requests.push({
+    updateParagraphStyle: {
+      range: { startIndex: 1, endIndex: cursor },
+      paragraphStyle: {
+        lineSpacing: DOC_LINE_SPACING,
+        spaceAbove: { magnitude: DOC_PARAGRAPH_SPACE_PT, unit: 'PT' },
+        spaceBelow: { magnitude: DOC_PARAGRAPH_SPACE_PT, unit: 'PT' },
+        direction: 'RIGHT_TO_LEFT',
+      },
+      fields: 'lineSpacing,spaceAbove,spaceBelow,direction',
+    },
+  });
+
+  requests.push({
+    updateTextStyle: {
+      range: { startIndex: 1, endIndex: cursor },
+      textStyle: {
+        fontSize: { magnitude: DOC_FONT_SIZE_PT, unit: 'PT' },
+        foregroundColor: { color: { rgbColor: COLOR_DARK } },
+      },
+      fields: 'fontSize,foregroundColor',
+    },
+  });
+
+  // Defensive: clamp styled ranges so no range exceeds document bounds
+  const validStyledRanges = styledRanges.filter(r => r.start < r.end && r.end <= cursor);
+
+  for (const range of validStyledRanges) {
+    switch (range.style) {
+      case 'title':
+        requests.push({
+          updateTextStyle: {
+            range: { startIndex: range.start, endIndex: range.end },
+            textStyle: { bold: true, fontSize: { magnitude: DOC_TITLE_FONT_SIZE_PT, unit: 'PT' }, foregroundColor: { color: { rgbColor: COLOR_PRIMARY } } },
+            fields: 'bold,fontSize,foregroundColor',
+          },
+        });
+        requests.push({
+          updateParagraphStyle: {
+            range: { startIndex: range.start, endIndex: range.end },
+            paragraphStyle: { alignment: 'CENTER', spaceBelow: { magnitude: 8, unit: 'PT' } },
+            fields: 'alignment,spaceBelow',
+          },
+        });
+        break;
+      case 'sectionHeader': {
+        const pal = getSourcePalette(range.sourceKey);
+        requests.push({
+          updateTextStyle: {
+            range: { startIndex: range.start, endIndex: range.end },
+            textStyle: { bold: true, fontSize: { magnitude: DOC_SECTION_FONT_SIZE_PT, unit: 'PT' }, foregroundColor: { color: { rgbColor: pal.accent } } },
+            fields: 'bold,fontSize,foregroundColor',
+          },
+        });
+        requests.push({
+          updateParagraphStyle: {
+            range: { startIndex: range.start, endIndex: range.end },
+            paragraphStyle: { spaceAbove: { magnitude: 12, unit: 'PT' }, borderBottom: { color: { color: { rgbColor: pal.accent } }, width: { magnitude: 1, unit: 'PT' }, padding: { magnitude: 4, unit: 'PT' }, dashStyle: 'SOLID' } },
+            fields: 'spaceAbove,borderBottom',
+          },
+        });
+        break;
+      }
+      case 'summaryHeader':
+        requests.push({
+          updateTextStyle: {
+            range: { startIndex: range.start, endIndex: range.end },
+            textStyle: { bold: true, fontSize: { magnitude: DOC_SECTION_FONT_SIZE_PT, unit: 'PT' }, foregroundColor: { color: { rgbColor: COLOR_PRIMARY } } },
+            fields: 'bold,fontSize,foregroundColor',
+          },
+        });
+        break;
+      case 'separator': {
+        const pal = getSourcePalette(range.sourceKey);
+        requests.push({
+          updateTextStyle: {
+            range: { startIndex: range.start, endIndex: range.end },
+            textStyle: { foregroundColor: { color: { rgbColor: pal.accent } }, fontSize: { magnitude: 6, unit: 'PT' } },
+            fields: 'foregroundColor,fontSize',
+          },
+        });
+        break;
+      }
+      case 'sourceLabel': {
+        const pal = getSourcePalette(range.sourceKey);
+        requests.push({
+          updateTextStyle: {
+            range: { startIndex: range.start, endIndex: range.end },
+            textStyle: { bold: true, foregroundColor: { color: { rgbColor: pal.accent } } },
+            fields: 'bold,foregroundColor',
+          },
+        });
+        break;
+      }
+      case 'bold': {
+        const pal = getSourcePalette(range.sourceKey);
+        requests.push({
+          updateTextStyle: {
+            range: { startIndex: range.start, endIndex: range.end },
+            textStyle: { bold: true, foregroundColor: { color: { rgbColor: pal.accent } } },
+            fields: 'bold,foregroundColor',
+          },
+        });
+        break;
+      }
+    }
+  }
+
+  for (const para of sourceParagraphs) {
+    if (para.start >= para.end || para.end > cursor) continue;
+    const pal = getSourcePalette(para.sourceKey);
+    requests.push({
+      updateParagraphStyle: {
+        range: { startIndex: para.start, endIndex: para.end },
+        paragraphStyle: { shading: { backgroundColor: { color: { rgbColor: pal.softBg } } }, indentStart: { magnitude: 10, unit: 'PT' }, indentEnd: { magnitude: 10, unit: 'PT' } },
+        fields: 'shading,indentStart,indentEnd',
+      },
+    });
+    requests.push({
+      updateTextStyle: {
+        range: { startIndex: para.start, endIndex: para.end },
+        textStyle: { foregroundColor: { color: { rgbColor: pal.accent } } },
+        fields: 'foregroundColor',
+      },
+    });
+  }
+
+  for (const para of summaryParagraphs) {
+    if (para.start >= para.end || para.end > cursor) continue;
+    requests.push({
+      updateParagraphStyle: {
+        range: { startIndex: para.start, endIndex: para.end },
+        paragraphStyle: { shading: { backgroundColor: { color: { rgbColor: COLOR_SUMMARY_BG } } }, indentStart: { magnitude: 10, unit: 'PT' }, indentEnd: { magnitude: 10, unit: 'PT' } },
+        fields: 'shading,indentStart,indentEnd',
+      },
+    });
+  }
+
+  await docs.documents.batchUpdate({ documentId, requestBody: { requests } });
+
+  return { id: documentId, url: `https://docs.google.com/document/d/${documentId}/edit` };
+}
+
+/**
+ * Creates a Google Doc containing only the סיכום למבחן for each séif in a siman.
+ */
+export async function createSummariesOnlyDoc(
+  guides: Array<{ tref: string; summary: string }>,
+  docTitle: string,
+): Promise<{ id: string; url: string }> {
+  const clientId = process.env.GOOGLE_OAUTH_CLIENT_ID;
+  const clientSecret = process.env.GOOGLE_OAUTH_CLIENT_SECRET;
+  const refreshToken = process.env.GOOGLE_OAUTH_REFRESH_TOKEN;
+
+  if (!clientId || !clientSecret || !refreshToken) {
+    throw new Error('[GoogleDocs] Missing OAuth credentials in env.');
+  }
+
+  const auth = new google.auth.OAuth2(clientId, clientSecret);
+  auth.setCredentials({ refresh_token: refreshToken });
+
+  const docs = google.docs({ version: 'v1', auth });
+  const drive = google.drive({ version: 'v3', auth });
+
+  const createResponse = await drive.files.create({
+    requestBody: {
+      name: docTitle,
+      mimeType: 'application/vnd.google-apps.document',
+    },
+    fields: 'id',
+  });
+
+  const documentId = createResponse.data.id;
+  if (!documentId) throw new Error('Google Drive API did not return a file ID.');
+
+  const styledRanges: StyledRange[] = [];
+  let fullContent = '';
+  let cursor = 1;
+
+  const summaryParagraphs: { start: number; end: number }[] = [];
+
+  const appendPlain = (text: string) => {
+    const safe = sanitizeForInsert(text);
+    fullContent += safe;
+    cursor += safe.length;
+  };
+
+  const appendStyled = (text: string, style: StyledRange['style'], sourceKey?: SourceResult['sourceKey']) => {
+    const safe = sanitizeForInsert(text);
+    const start = cursor;
+    fullContent += safe;
+    cursor += safe.length;
+    styledRanges.push({ start, end: cursor, style, sourceKey });
+  };
+
+  const appendBoldAware = (text: string) => {
+    const { cleanText, ranges } = extractBoldRanges(sanitizeForInsert(text), cursor);
+    fullContent += cleanText;
+    cursor += cleanText.length;
+    styledRanges.push(...ranges);
+  };
+
+  // Doc-level title
+  appendStyled(`${docTitle}\n`, 'title');
+  appendPlain('\n');
+
+  for (let gi = 0; gi < guides.length; gi++) {
+    const { tref, summary } = guides[gi]!;
+
+    appendStyled(`${tref}\n`, 'sectionHeader');
+    appendStyled('--------------------\n', 'separator');
+
+    const formattedSummary = structureSummaryForDoc(summary);
+    if (formattedSummary) {
+      const summaryStart = cursor;
+      appendBoldAware(`${formattedSummary}\n`);
+      summaryParagraphs.push({ start: summaryStart, end: cursor });
+    } else {
+      appendPlain('לא הופק סיכום.\n');
+    }
+
+    if (gi < guides.length - 1) {
+      appendPlain('\n\n');
+    }
+  }
+
+  if (cursor <= 1) {
+    return { id: documentId, url: `https://docs.google.com/document/d/${documentId}/edit` };
+  }
+
+  const requests: docs_v1.Schema$Request[] = [
+    { insertText: { location: { index: 1 }, text: fullContent } },
+  ];
+
+  requests.push({
+    updateParagraphStyle: {
+      range: { startIndex: 1, endIndex: cursor },
+      paragraphStyle: {
+        lineSpacing: DOC_LINE_SPACING,
+        spaceAbove: { magnitude: DOC_PARAGRAPH_SPACE_PT, unit: 'PT' },
+        spaceBelow: { magnitude: DOC_PARAGRAPH_SPACE_PT, unit: 'PT' },
+        direction: 'RIGHT_TO_LEFT',
+      },
+      fields: 'lineSpacing,spaceAbove,spaceBelow,direction',
+    },
+  });
+
+  requests.push({
+    updateTextStyle: {
+      range: { startIndex: 1, endIndex: cursor },
+      textStyle: {
+        fontSize: { magnitude: DOC_FONT_SIZE_PT, unit: 'PT' },
+        foregroundColor: { color: { rgbColor: COLOR_DARK } },
+      },
+      fields: 'fontSize,foregroundColor',
+    },
+  });
+
+  const validRanges = styledRanges.filter(r => r.start < r.end && r.end <= cursor);
+
+  for (const range of validRanges) {
+    switch (range.style) {
+      case 'title':
+        requests.push({
+          updateTextStyle: {
+            range: { startIndex: range.start, endIndex: range.end },
+            textStyle: { bold: true, fontSize: { magnitude: DOC_TITLE_FONT_SIZE_PT, unit: 'PT' }, foregroundColor: { color: { rgbColor: COLOR_PRIMARY } } },
+            fields: 'bold,fontSize,foregroundColor',
+          },
+        });
+        requests.push({
+          updateParagraphStyle: {
+            range: { startIndex: range.start, endIndex: range.end },
+            paragraphStyle: { alignment: 'CENTER', spaceBelow: { magnitude: 8, unit: 'PT' } },
+            fields: 'alignment,spaceBelow',
+          },
+        });
+        break;
+      case 'sectionHeader':
+        requests.push({
+          updateTextStyle: {
+            range: { startIndex: range.start, endIndex: range.end },
+            textStyle: { bold: true, fontSize: { magnitude: DOC_SECTION_FONT_SIZE_PT, unit: 'PT' }, foregroundColor: { color: { rgbColor: COLOR_PRIMARY } } },
+            fields: 'bold,fontSize,foregroundColor',
+          },
+        });
+        requests.push({
+          updateParagraphStyle: {
+            range: { startIndex: range.start, endIndex: range.end },
+            paragraphStyle: {
+              spaceAbove: { magnitude: 12, unit: 'PT' },
+              borderBottom: { color: { color: { rgbColor: COLOR_PRIMARY } }, width: { magnitude: 1, unit: 'PT' }, padding: { magnitude: 4, unit: 'PT' }, dashStyle: 'SOLID' },
+            },
+            fields: 'spaceAbove,borderBottom',
+          },
+        });
+        break;
+      case 'separator':
+        requests.push({
+          updateTextStyle: {
+            range: { startIndex: range.start, endIndex: range.end },
+            textStyle: { foregroundColor: { color: { rgbColor: COLOR_PRIMARY } }, fontSize: { magnitude: 6, unit: 'PT' } },
+            fields: 'foregroundColor,fontSize',
+          },
+        });
+        break;
+      case 'bold':
+        requests.push({
+          updateTextStyle: {
+            range: { startIndex: range.start, endIndex: range.end },
+            textStyle: { bold: true },
+            fields: 'bold',
+          },
+        });
+        break;
+    }
+  }
+
+  for (const para of summaryParagraphs) {
+    if (para.start >= para.end || para.end > cursor) continue;
+    requests.push({
+      updateParagraphStyle: {
+        range: { startIndex: para.start, endIndex: para.end },
+        paragraphStyle: {
+          shading: { backgroundColor: { color: { rgbColor: COLOR_SUMMARY_BG } } },
+          indentStart: { magnitude: 10, unit: 'PT' },
+          indentEnd: { magnitude: 10, unit: 'PT' },
+        },
+        fields: 'shading,indentStart,indentEnd',
+      },
+    });
+  }
+
+  await docs.documents.batchUpdate({ documentId, requestBody: { requests } });
+
+  return { id: documentId, url: `https://docs.google.com/document/d/${documentId}/edit` };
 }

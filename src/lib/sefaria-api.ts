@@ -6,8 +6,8 @@
 import { hebrewToNumber } from '@/lib/hebrew-utils';
 import { chunkStructuredText } from '@/lib/chunker';
 
-export type SourceKey = 'tur' | 'beit_yosef' | 'shulchan_arukh' | 'mishnah_berurah' | 'torah_ohr';
-export type FetchMode = 'exact-seif' | 'linked-passages' | 'full-siman';
+export type SourceKey = 'tur' | 'beit_yosef' | 'shulchan_arukh' | 'mishnah_berurah' | 'torah_ohr' | 'rav_ovadia';
+export type FetchMode = 'exact-seif' | 'linked-passages' | 'full-siman' | 'ai-generated';
 
 export interface SourceConfig {
   key: SourceKey;
@@ -65,12 +65,21 @@ export const SOURCE_CONFIGS: Record<SourceKey, SourceConfig> = {
     supportsSeif: true,
     onlyOrachChayim: false,
   },
+  rav_ovadia: {
+    key: 'rav_ovadia',
+    hebrewLabel: 'רב עובדיה יוסף',
+    sefariaPrefix: '',          // AI-generated — no Sefaria fetch
+    includesSection: false,
+    supportsSeif: false,
+    onlyOrachChayim: false,
+  },
 };
 
 /** Canonical processing order for multi-source guides. */
-export const SOURCE_PROCESSING_ORDER: SourceKey[] = ['tur', 'beit_yosef', 'shulchan_arukh', 'torah_ohr'];
+export const SOURCE_PROCESSING_ORDER: SourceKey[] = ['tur', 'beit_yosef', 'shulchan_arukh', 'mishnah_berurah', 'torah_ohr', 'rav_ovadia'];
 
 export function resolveFetchMode(sourceKey: SourceKey): FetchMode {
+  if (sourceKey === 'rav_ovadia') return 'ai-generated';
   if (sourceKey === 'tur' || sourceKey === 'beit_yosef') {
     return 'linked-passages';
   }
