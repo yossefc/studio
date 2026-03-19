@@ -38,6 +38,12 @@ const TalmudAIChatbotExplanationInputSchema = z.object({
 
 export type TalmudAIChatbotExplanationInput = z.infer<typeof TalmudAIChatbotExplanationInputSchema>;
 
+const UsageSchema = z.object({
+  inputTokens: z.number().default(0),
+  outputTokens: z.number().default(0),
+  totalTokens: z.number().default(0),
+});
+
 const TalmudAIChatbotExplanationOutputSchema = z.object({
   explanation: z.string().describe('AI-generated explanation.'),
   modelUsed: z.string().describe('The model name used.'),
@@ -45,9 +51,21 @@ const TalmudAIChatbotExplanationOutputSchema = z.object({
   promptVersion: z.string(),
   validated: z.boolean().default(true),
   durationMs: z.number().optional(),
+  usage: UsageSchema,
 });
 
 export type TalmudAIChatbotExplanationOutput = z.infer<typeof TalmudAIChatbotExplanationOutputSchema>;
+
+function mergeUsage(
+  left: TalmudAIChatbotExplanationOutput['usage'],
+  right: TalmudAIChatbotExplanationOutput['usage'],
+): TalmudAIChatbotExplanationOutput['usage'] {
+  return {
+    inputTokens: (left.inputTokens ?? 0) + (right.inputTokens ?? 0),
+    outputTokens: (left.outputTokens ?? 0) + (right.outputTokens ?? 0),
+    totalTokens: (left.totalTokens ?? 0) + (right.totalTokens ?? 0),
+  };
+}
 
 function getMetivtaStyleInstructions(): string {
   return `כללי סגנון מחייבים לכל המקורות:
@@ -217,6 +235,7 @@ export const talmudAIChatbotExplanationFlow = ai.defineFlow(
             promptVersion: data.promptVersion,
             validated: data.validated ?? true,
             durationMs: Date.now() - startTime,
+            usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
           };
         }
       }
@@ -264,6 +283,7 @@ export const talmudAIChatbotExplanationFlow = ai.defineFlow(
           promptVersion: data.promptVersion || PROMPT_VERSION,
           validated: data.validated ?? true,
           durationMs: Date.now() - startTime,
+          usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
         };
       } catch (error) {
         console.warn('[Flow-Cache] Legacy read error:', error);
@@ -383,6 +403,7 @@ ${input.currentSegment}
 
     let explanation = generated.text;
     let modelUsed = generated.modelUsed;
+    let usage = generated.usage;
 
     let validated = validateHebrewOutput(explanation);
 
@@ -406,6 +427,7 @@ Rewritten Hebrew text: `;
       explanation = repaired.text;
       modelUsed = repaired.modelUsed;
       validated = validateHebrewOutput(explanation);
+      usage = mergeUsage(usage, repaired.usage);
     }
 
     try {
@@ -441,6 +463,7 @@ Rewritten Hebrew text: `;
       promptVersion: PROMPT_VERSION,
       validated,
       durationMs,
+      usage,
     };
   },
 );

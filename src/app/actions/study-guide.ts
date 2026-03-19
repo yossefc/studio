@@ -8,6 +8,7 @@ import {
   resolveFetchMode,
   getLinkedSourcesForShulchanArukhSeif,
   getTurSegmentsForSeif,
+  fetchSefariaTopicsForRef,
 } from '@/lib/sefaria-api';
 import type { SourceKey, SefariaResponse, FetchMode, StructuredChunk } from '@/lib/sefaria-api';
 import { chunkStructuredText, type TextChunk } from '@/lib/chunker';
@@ -17,11 +18,22 @@ import { generateRavOvadiaOpinion } from '@/ai/flows/rav-ovadia-opinion';
 import { createStudyGuideDoc, createAllGuidesDoc, createSummariesOnlyDoc } from '@/lib/google-docs';
 import { getOrBuildSimanAlignment } from './siman-alignment';
 import { getEffectiveModel } from '@/ai/genkit';
-import { logGenerationMetrics } from '@/lib/metrics';
+import { addUsage, estimateTokenCostUsd, logGenerationMetrics, normalizeUsage, type UsageSnapshot } from '@/lib/metrics';
 import { getAdminDb } from '@/server/firebase-admin';
-import { MAX_CHUNKS_PER_SOURCE, CANCELLATION_CHECK_INTERVAL } from '@/lib/constants';
+import {
+  MAX_CHUNKS_PER_GUIDE,
+  MAX_CHUNKS_PER_SOURCE,
+  CANCELLATION_CHECK_INTERVAL,
+  SUMMARY_PROGRESS_UNITS,
+  ACTION_RATE_LIMIT_WINDOW_SECONDS,
+  GENERATION_RATE_LIMIT_IP_MAX,
+  EXPORT_RATE_LIMIT_IP_MAX,
+} from '@/lib/constants';
 import { FieldValue, Timestamp } from 'firebase-admin/firestore';
 import { createHash } from 'crypto';
+import { getAuthenticatedUser } from '@/lib/server-auth';
+import { assertActionRateLimit, getRequestIpAddress } from '@/lib/rate-limit';
+import { getUserUsagePolicy } from '@/lib/usage-policy';
 
 export interface ProcessedChunk {
   id: string;
@@ -63,6 +75,7 @@ export interface GenerationResult {
     sources: SourceKey[];
     summaryModel?: string;
     validated?: boolean;
+    topics?: string[];
   };
   error?: string;
   cancelled?: boolean;
@@ -75,6 +88,98 @@ const CANONICAL_READY_WAIT_ATTEMPTS = 20;
 const CANONICAL_READY_WAIT_MS = 1500;
 
 type CanonicalLockState = 'acquired' | 'ready' | 'wait';
+
+type UsageTotals = UsageSnapshot & {
+  estimatedCostUsd: number;
+  modelsUsed: string[];
+};
+
+function createEmptyUsageTotals(): UsageTotals {
+  return {
+    inputTokens: 0,
+    outputTokens: 0,
+    totalTokens: 0,
+    estimatedCostUsd: 0,
+    modelsUsed: [],
+  };
+}
+
+function addUsageTotals(
+  totals: UsageTotals,
+  modelName: string | undefined,
+  usage?: Partial<UsageSnapshot> | null,
+): UsageTotals {
+  const normalizedUsage = normalizeUsage(usage);
+  const shouldTrackModel = !!modelName && normalizedUsage.totalTokens > 0;
+  const modelsUsed = shouldTrackModel && !totals.modelsUsed.includes(modelName!)
+    ? [...totals.modelsUsed, modelName!]
+    : totals.modelsUsed;
+
+  const aggregatedUsage = addUsage(totals, normalizedUsage);
+
+  return {
+    ...aggregatedUsage,
+    estimatedCostUsd: totals.estimatedCostUsd + (modelName ? estimateTokenCostUsd(modelName, normalizedUsage) : 0),
+    modelsUsed,
+  };
+}
+
+function mergeUsageTotals(left: UsageTotals, right: UsageTotals): UsageTotals {
+  const usage = addUsage(left, right);
+
+  return {
+    ...usage,
+    estimatedCostUsd: left.estimatedCostUsd + right.estimatedCostUsd,
+    modelsUsed: Array.from(new Set([...left.modelsUsed, ...right.modelsUsed])),
+  };
+}
+
+function getMonthBounds(date = new Date()): { start: Timestamp; end: Timestamp } {
+  const startDate = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), 1, 0, 0, 0, 0));
+  const endDate = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + 1, 1, 0, 0, 0, 0));
+
+  return {
+    start: Timestamp.fromDate(startDate),
+    end: Timestamp.fromDate(endDate),
+  };
+}
+
+async function assertMonthlyQuotaAvailable(userId: string, monthlyLimit: number): Promise<void> {
+  if (!Number.isFinite(monthlyLimit) || monthlyLimit < 0) {
+    return;
+  }
+
+  const db = getAdminDb();
+  const { start, end } = getMonthBounds();
+  const usageSnap = await db.collection('users').doc(userId).collection('usageLedger')
+    .where('createdAt', '>=', start)
+    .where('createdAt', '<', end)
+    .get();
+
+  if (usageSnap.size >= monthlyLimit) {
+    throw new Error(`Monthly generation quota reached (${monthlyLimit}).`);
+  }
+}
+
+async function recordUsageLedgerEntry(
+  userId: string,
+  guideId: string,
+  usageTotals: UsageTotals,
+  defaultModel: string,
+): Promise<void> {
+  const db = getAdminDb();
+  const modelUsed = usageTotals.modelsUsed.length > 0 ? usageTotals.modelsUsed.join(', ') : defaultModel;
+
+  await db.collection('users').doc(userId).collection('usageLedger').doc(guideId).set({
+    guideId,
+    modelUsed,
+    inputTokens: usageTotals.inputTokens,
+    outputTokens: usageTotals.outputTokens,
+    totalTokens: usageTotals.totalTokens,
+    estimatedCostUsd: Number(usageTotals.estimatedCostUsd.toFixed(6)),
+    createdAt: Timestamp.now(),
+  }, { merge: true });
+}
 
 function sortSources(sources: SourceKey[]): SourceKey[] {
   return [...sources].sort((a, b) => a.localeCompare(b));
@@ -127,9 +232,8 @@ function isKnownSourceKey(value: unknown): value is SourceKey {
 }
 
 function getChunkLimitForSource(sourceKey: SourceKey): number {
-  // Torah Ohr can contain long maamarim; truncating to the generic cap drops large parts.
   if (sourceKey === 'torah_ohr') {
-    return Number.POSITIVE_INFINITY;
+    return MAX_CHUNKS_PER_GUIDE;
   }
   return MAX_CHUNKS_PER_SOURCE;
 }
@@ -280,6 +384,9 @@ async function loadCanonicalGuide(cacheKey: string): Promise<GenerationResult['g
     sources,
     summaryModel: typeof guideData.summaryModel === 'string' ? guideData.summaryModel : undefined,
     validated: typeof guideData.validated === 'boolean' ? guideData.validated : undefined,
+    topics: Array.isArray(guideData.topics)
+      ? guideData.topics.filter((topic: unknown): topic is string => typeof topic === 'string' && topic.trim().length > 0)
+      : undefined,
   };
 }
 
@@ -323,6 +430,7 @@ async function saveCanonicalGuide(
     summaryText: guideData.summary,
     summaryModel: guideData.summaryModel || null,
     validated: guideData.validated ?? false,
+    topics: guideData.topics || [],
     chunkCount: totalChunks,
     updatedAt: FieldValue.serverTimestamp(),
     lastGeneratedAt: FieldValue.serverTimestamp(),
@@ -366,6 +474,7 @@ async function persistGuideResultForUser(
   userId: string,
   guideId: string,
   guideData: NonNullable<GenerationResult['guideData']>,
+  progressTotalOverride?: number,
 ): Promise<void> {
   const db = getAdminDb();
   const guideRef = db.collection('users').doc(userId).collection('studyGuides').doc(guideId);
@@ -380,6 +489,7 @@ async function persistGuideResultForUser(
     : nowIso;
 
   const totalChunks = guideData.sourceResults.reduce((sum, source) => sum + source.chunks.length, 0);
+  const progressTotal = progressTotalOverride ?? totalChunks;
 
   await guideRef.set({
     id: guideId,
@@ -399,9 +509,10 @@ async function persistGuideResultForUser(
     sources: guideData.sources,
     createdAt: existingCreatedAt,
     updatedAt: nowIso,
-    progressDone: totalChunks,
-    progressTotal: totalChunks,
+    progressDone: progressTotal,
+    progressTotal,
     progressPhase: 'summary',
+    ...(guideData.topics && guideData.topics.length > 0 ? { topics: guideData.topics } : {}),
   }, { merge: true });
 
   const chunkWrites: Array<{ id: string; data: Record<string, unknown> }> = [];
@@ -765,17 +876,18 @@ async function processSourceChunks(
   companionText: string | undefined,
   passagesOnlyMode: boolean,
   onChunkDone?: () => void,
-): Promise<{ chunks: ProcessedChunk[]; cacheHits: number; cancelled: boolean }> {
+): Promise<{ chunks: ProcessedChunk[]; cacheHits: number; cancelled: boolean; usageTotals: UsageTotals }> {
   const processed: ProcessedChunk[] = [];
   let cacheHits = 0;
   let previousSegment: string | null = null;
   let previousExplanation: string | null = null;
+  let usageTotals = createEmptyUsageTotals();
 
   for (let i = 0; i < rawChunks.length; i++) {
     const chunk = rawChunks[i];
 
     if (i % CANCELLATION_CHECK_INTERVAL === 0 && await isCancelled(userId, guideId)) {
-      return { chunks: processed, cacheHits, cancelled: true };
+      return { chunks: processed, cacheHits, cancelled: true, usageTotals };
     }
 
     const rawHash = createHash('sha256').update(chunk.text).digest('hex');
@@ -807,6 +919,7 @@ async function processSourceChunks(
         companionText: sourceKey === 'shulchan_arukh' ? companionText : undefined,
       });
       if (llmResult.cacheHit) cacheHits += 1;
+      usageTotals = addUsageTotals(usageTotals, llmResult.modelUsed, llmResult.usage);
       result = {
         explanation: llmResult.explanation,
         modelUsed: llmResult.modelUsed,
@@ -834,15 +947,14 @@ async function processSourceChunks(
     if (onChunkDone) onChunkDone();
   }
 
-  return { chunks: processed, cacheHits, cancelled: false };
+  return { chunks: processed, cacheHits, cancelled: false, usageTotals };
 }
 
 export async function generateMultiSourceStudyGuide(
   request: MultiSourceRequest,
-  userId: string,
   guideId: string,
 ): Promise<GenerationResult> {
-  if (!userId || !guideId) {
+  if (!guideId) {
     return { success: false, error: 'חסר מזהה משתמש או מזהה מדריך.' };
   }
 
@@ -850,6 +962,7 @@ export async function generateMultiSourceStudyGuide(
     return { success: false, error: 'יש לבחור לפחות מקור אחד.' };
   }
 
+  let userId = '';
   const startTime = Date.now();
   let totalCacheHits = 0;
   let totalChunkCount = 0;
@@ -857,11 +970,39 @@ export async function generateMultiSourceStudyGuide(
   let hasCanonicalLock = false;
 
   try {
+    const authUser = await getAuthenticatedUser();
+    userId = authUser.uid;
+    const ipAddress = await getRequestIpAddress();
+    const usagePolicy = await getUserUsagePolicy({
+      uid: authUser.uid,
+      email: authUser.email,
+    });
+
+    if (!usagePolicy.unlimited) {
+      await assertActionRateLimit({
+        action: 'study-guide-generation',
+        userId,
+        ipAddress,
+        windowSeconds: ACTION_RATE_LIMIT_WINDOW_SECONDS,
+        userLimit: usagePolicy.generationRateLimitUserMax,
+        ipLimit: GENERATION_RATE_LIMIT_IP_MAX,
+      });
+
+      await assertMonthlyQuotaAvailable(userId, usagePolicy.monthlyGenerationLimit);
+    }
+
     let canonicalState = await tryAcquireCanonicalLock(canonicalCacheKey, request);
 
     if (canonicalState === 'ready') {
       const cachedGuide = await loadCanonicalGuide(canonicalCacheKey);
       if (cachedGuide) {
+        await persistGuideResultForUser(userId, guideId, cachedGuide);
+        await recordUsageLedgerEntry(
+          userId,
+          guideId,
+          createEmptyUsageTotals(),
+          cachedGuide.summaryModel || 'canonical-cache',
+        );
         return { success: true, guideData: cachedGuide };
       }
       canonicalState = await tryAcquireCanonicalLock(canonicalCacheKey, request);
@@ -870,6 +1011,13 @@ export async function generateMultiSourceStudyGuide(
     if (canonicalState === 'wait') {
       const waitedGuide = await waitForCanonicalGuide(canonicalCacheKey);
       if (waitedGuide) {
+        await persistGuideResultForUser(userId, guideId, waitedGuide);
+        await recordUsageLedgerEntry(
+          userId,
+          guideId,
+          createEmptyUsageTotals(),
+          waitedGuide.summaryModel || 'canonical-cache',
+        );
         return { success: true, guideData: waitedGuide };
       }
 
@@ -877,6 +1025,13 @@ export async function generateMultiSourceStudyGuide(
       if (canonicalState === 'ready') {
         const cachedGuide = await loadCanonicalGuide(canonicalCacheKey);
         if (cachedGuide) {
+          await persistGuideResultForUser(userId, guideId, cachedGuide);
+          await recordUsageLedgerEntry(
+            userId,
+            guideId,
+            createEmptyUsageTotals(),
+            cachedGuide.summaryModel || 'canonical-cache',
+          );
           return { success: true, guideData: cachedGuide };
         }
       }
@@ -940,7 +1095,17 @@ export async function generateMultiSourceStudyGuide(
 
     // Pre-chunk to count total while preserving source structure.
     const sourceChunkMap = new Map<SourceKey, { tref: string; chunks: TextChunk[] }>();
-    for (const { sourceKey, tref, data, fetchMode } of sourceFetches) {
+    let remainingGuideChunkBudget = MAX_CHUNKS_PER_GUIDE;
+    const orderedSourceFetches = [...sourceFetches].sort(
+      (a, b) => SOURCE_PROCESSING_ORDER.indexOf(a.sourceKey) - SOURCE_PROCESSING_ORDER.indexOf(b.sourceKey)
+    );
+
+    for (const { sourceKey, tref, data, fetchMode } of orderedSourceFetches) {
+      if (remainingGuideChunkBudget <= 0) {
+        console.warn(`[Action] Global chunk budget (${MAX_CHUNKS_PER_GUIDE}) reached before processing ${sourceKey}.`);
+        break;
+      }
+
       const segments: StructuredChunk[] = Array.isArray(data.segments) && data.segments.length > 0
         ? data.segments
         : (Array.isArray(data.he) ? data.he : []).map((text, index) => ({
@@ -955,10 +1120,12 @@ export async function generateMultiSourceStudyGuide(
 
       const allChunks = chunkStructuredText(segments, sourceKey);
       const sourceChunkLimit = getChunkLimitForSource(sourceKey);
-      const limited = Number.isFinite(sourceChunkLimit)
+      const limitedBySource = Number.isFinite(sourceChunkLimit)
         ? allChunks.slice(0, sourceChunkLimit)
         : allChunks;
-      if (allChunks.length > limited.length) {
+      const limited = limitedBySource.slice(0, remainingGuideChunkBudget);
+
+      if (allChunks.length > limitedBySource.length || limitedBySource.length > limited.length) {
         console.warn(`[Action] ${sourceKey}: ${allChunks.length} chunks, limiting to ${limited.length}.`);
       }
       if (fetchMode === 'linked-passages') {
@@ -966,18 +1133,44 @@ export async function generateMultiSourceStudyGuide(
       } else if (fetchMode === 'full-siman') {
         console.info(`[Action] ${sourceKey}: using full siman strategy (${segments.length} structured segments).`);
       }
+
+      if (limited.length === 0) {
+        continue;
+      }
+
       sourceChunkMap.set(sourceKey, { tref, chunks: limited });
       totalChunkCount += limited.length;
+      remainingGuideChunkBudget -= limited.length;
+    }
+
+    let mbRawChunks: TextChunk[] = [];
+    if (mbData && request.sources.includes('mishnah_berurah') && remainingGuideChunkBudget > 0) {
+      const mbSegments: StructuredChunk[] = Array.isArray(mbData.segments) && mbData.segments.length > 0
+        ? mbData.segments
+        : (Array.isArray(mbData.he) ? mbData.he : []).map((text, index) => ({
+            ref: mbData.ref,
+            path: [index],
+            text,
+          }));
+
+      if (mbSegments.length > 0) {
+        mbRawChunks = chunkStructuredText(mbSegments, 'mishnah_berurah')
+          .slice(0, Math.min(MAX_CHUNKS_PER_SOURCE, remainingGuideChunkBudget));
+        totalChunkCount += mbRawChunks.length;
+        remainingGuideChunkBudget -= mbRawChunks.length;
+      }
     }
 
     const modelToUse = getEffectiveModel(totalChunkCount);
+    const ravOvadiaProgressUnits = request.sources.includes('rav_ovadia') && request.sources.includes('shulchan_arukh') ? 1 : 0;
+    const progressTotal = totalChunkCount + ravOvadiaProgressUnits + SUMMARY_PROGRESS_UNITS;
 
     // Write total chunk count to Firestore so the client can show a progress bar
     const db = getAdminDb();
     const guideRef = db.collection('users').doc(userId).collection('studyGuides').doc(guideId);
     await guideRef.update({
       progressDone: 0,
-      progressTotal: totalChunkCount,
+      progressTotal,
       progressPhase: 'chunks',
     });
 
@@ -992,6 +1185,7 @@ export async function generateMultiSourceStudyGuide(
 
     // 4. Process all sources in PARALLEL (each source still processes chunks sequentially for context)
     const sourceResults: SourceResult[] = [];
+    let overallUsageTotals = createEmptyUsageTotals();
 
     const sourceProcessingPromises = SOURCE_PROCESSING_ORDER
       .filter(sourceKey => sourceChunkMap.has(sourceKey))
@@ -1020,6 +1214,7 @@ export async function generateMultiSourceStudyGuide(
     let cancelled = false;
     for (const { sourceKey, result, tref, config } of parallelResults) {
       totalCacheHits += result.cacheHits;
+      overallUsageTotals = mergeUsageTotals(overallUsageTotals, result.usageTotals);
 
       if (result.cancelled) {
         console.info(`[Action-Cancel] Stopped at source ${sourceKey} for user ${userId}`);
@@ -1049,19 +1244,8 @@ export async function generateMultiSourceStudyGuide(
     }
 
     // Process Mishnah Berurah through AI explanation (style מתיבתא)
-    if (mbData && request.sources.includes('mishnah_berurah')) {
-      const mbSegments: StructuredChunk[] = Array.isArray(mbData.segments) && mbData.segments.length > 0
-        ? mbData.segments
-        : (Array.isArray(mbData.he) ? mbData.he : []).map((text, index) => ({
-            ref: mbData.ref,
-            path: [index],
-            text,
-          }));
-
-      if (mbSegments.length > 0) {
-        const mbRawChunks = chunkStructuredText(mbSegments, 'mishnah_berurah').slice(0, MAX_CHUNKS_PER_SOURCE);
-
-        const mbResult = await processSourceChunks(
+    if (mbData && request.sources.includes('mishnah_berurah') && mbRawChunks.length > 0) {
+      const mbResult = await processSourceChunks(
           mbRawChunks,
           mbData.ref,
           'mishnah_berurah',
@@ -1073,15 +1257,23 @@ export async function generateMultiSourceStudyGuide(
           reportProgress,
         );
 
-        if (!mbResult.cancelled && mbResult.chunks.length > 0) {
-          totalCacheHits += mbResult.cacheHits;
-          sourceResults.push({
-            sourceKey: 'mishnah_berurah',
-            hebrewLabel: SOURCE_CONFIGS.mishnah_berurah.hebrewLabel,
-            tref: mbData.ref,
-            chunks: mbResult.chunks,
-          });
+      if (mbResult.cancelled) {
+        if (hasCanonicalLock) {
+          await markCanonicalFailed(canonicalCacheKey, 'cancelled');
         }
+        return { success: false, cancelled: true };
+      }
+
+      totalCacheHits += mbResult.cacheHits;
+      overallUsageTotals = mergeUsageTotals(overallUsageTotals, mbResult.usageTotals);
+
+      if (mbResult.chunks.length > 0) {
+        sourceResults.push({
+          sourceKey: 'mishnah_berurah',
+          hebrewLabel: SOURCE_CONFIGS.mishnah_berurah.hebrewLabel,
+          tref: mbData.ref,
+          chunks: mbResult.chunks,
+        });
       }
     }
 
@@ -1120,6 +1312,8 @@ export async function generateMultiSourceStudyGuide(
             tref: `${request.section} ${request.siman}${request.seif ? `:${request.seif}` : ''}`,
             chunks: [ravOvadiaChunk],
           });
+          overallUsageTotals = addUsageTotals(overallUsageTotals, ravOvadiaResult.modelUsed, ravOvadiaResult.usage);
+          await reportProgress();
         }
       } catch (ravOvadiaError) {
         console.warn('[Action] Failed to generate Rav Ovadia opinion:', ravOvadiaError);
@@ -1140,17 +1334,22 @@ export async function generateMultiSourceStudyGuide(
       await guideRef.update({ progressPhase: 'summary' });
     } catch { /* ignore */ }
 
-    const summaryResult = (request.torahOhrPassagesOnly && request.sources.length === 1 && request.sources[0] === 'torah_ohr')
+    const summaryResult: Awaited<ReturnType<typeof summarizeTalmudStudyGuide>> = (request.torahOhrPassagesOnly && request.sources.length === 1 && request.sources[0] === 'torah_ohr')
       ? {
         summary: `תצוגת כל קטעי הפרשה ${request.siman} מתוך תורה אור (ללא ביאור AI).`,
         modelUsed: 'passages-only',
         validated: true,
+        validationErrors: [],
+        usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
       }
       : await summarizeTalmudStudyGuide({
         studyGuideText: allExplanations,
         modelName: modelToUse,
         sources: request.sources,
       });
+
+    overallUsageTotals = addUsageTotals(overallUsageTotals, summaryResult.modelUsed, summaryResult.usage);
+    await reportProgress();
 
     // 6. Log metrics
     const duration = Date.now() - startTime;
@@ -1159,11 +1358,17 @@ export async function generateMultiSourceStudyGuide(
       chunkCount: totalChunkCount,
       durationMs: duration,
       cacheHits: totalCacheHits,
+      inputTokens: overallUsageTotals.inputTokens,
+      outputTokens: overallUsageTotals.outputTokens,
+      totalTokens: overallUsageTotals.totalTokens,
+      estimatedCostUsd: overallUsageTotals.estimatedCostUsd,
     });
 
     // Primary tref = SA if present, otherwise first source
     const primaryTref = sourceResults.find(sr => sr.sourceKey === 'shulchan_arukh')?.tref
       || sourceResults[0].tref;
+
+    const fetchedTopics = await fetchSefariaTopicsForRef(primaryTref).catch(() => [] as string[]);
 
     const finalGuideData: NonNullable<GenerationResult['guideData']> = {
       tref: primaryTref,
@@ -1174,6 +1379,7 @@ export async function generateMultiSourceStudyGuide(
       validated: summaryResult.validated && sourceResults.every(sr =>
         sr.chunks.every(c => c.validated)
       ),
+      topics: fetchedTopics.length > 0 ? fetchedTopics : undefined,
     };
 
     if (hasCanonicalLock) {
@@ -1186,7 +1392,8 @@ export async function generateMultiSourceStudyGuide(
     }
 
     try {
-      await persistGuideResultForUser(userId, guideId, finalGuideData);
+      await persistGuideResultForUser(userId, guideId, finalGuideData, progressTotal);
+      await recordUsageLedgerEntry(userId, guideId, overallUsageTotals, modelToUse);
     } catch (userPersistError) {
       console.warn('[Action] Failed to persist user guide result on server:', userPersistError);
     }
@@ -1221,6 +1428,21 @@ export async function exportToGoogleDocs(
   sourceResults: SourceResult[],
 ): Promise<{ success: boolean; googleDocId?: string; googleDocUrl?: string; error?: string }> {
   try {
+    const authUser = await getAuthenticatedUser();
+    const usagePolicy = await getUserUsagePolicy({
+      uid: authUser.uid,
+      email: authUser.email,
+    });
+    if (!usagePolicy.unlimited) {
+      await assertActionRateLimit({
+        action: 'google-doc-export',
+        userId: authUser.uid,
+        ipAddress: await getRequestIpAddress(),
+        windowSeconds: ACTION_RATE_LIMIT_WINDOW_SECONDS,
+        userLimit: usagePolicy.exportRateLimitUserMax,
+        ipLimit: EXPORT_RATE_LIMIT_IP_MAX,
+      });
+    }
     const docData = await createStudyGuideDoc(tref, summary, sourceResults);
     return {
       success: true,
@@ -1237,11 +1459,26 @@ export async function exportToGoogleDocs(
 }
 
 export async function exportSimanSummariesToGoogleDocs(
-  userId: string,
   guideIds: string[],
   simanLabel: string,
 ): Promise<{ success: boolean; googleDocUrl?: string; error?: string }> {
   try {
+    const authUser = await getAuthenticatedUser();
+    const userId = authUser.uid;
+    const usagePolicy = await getUserUsagePolicy({
+      uid: authUser.uid,
+      email: authUser.email,
+    });
+    if (!usagePolicy.unlimited) {
+      await assertActionRateLimit({
+        action: 'google-doc-export',
+        userId,
+        ipAddress: await getRequestIpAddress(),
+        windowSeconds: ACTION_RATE_LIMIT_WINDOW_SECONDS,
+        userLimit: usagePolicy.exportRateLimitUserMax,
+        ipLimit: EXPORT_RATE_LIMIT_IP_MAX,
+      });
+    }
     const db = getAdminDb();
     const guidesRef = db.collection('users').doc(userId).collection('studyGuides');
 
@@ -1282,10 +1519,25 @@ export async function exportSimanSummariesToGoogleDocs(
 }
 
 export async function exportAllGuidesToGoogleDocs(
-  userId: string,
   guideIds: string[],
 ): Promise<{ success: boolean; googleDocUrl?: string; error?: string }> {
   try {
+    const authUser = await getAuthenticatedUser();
+    const userId = authUser.uid;
+    const usagePolicy = await getUserUsagePolicy({
+      uid: authUser.uid,
+      email: authUser.email,
+    });
+    if (!usagePolicy.unlimited) {
+      await assertActionRateLimit({
+        action: 'google-doc-export',
+        userId,
+        ipAddress: await getRequestIpAddress(),
+        windowSeconds: ACTION_RATE_LIMIT_WINDOW_SECONDS,
+        userLimit: usagePolicy.exportRateLimitUserMax,
+        ipLimit: EXPORT_RATE_LIMIT_IP_MAX,
+      });
+    }
     const db = getAdminDb();
     const guidesRef = db.collection('users').doc(userId).collection('studyGuides');
 

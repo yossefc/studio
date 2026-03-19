@@ -13,3 +13,24 @@ export const MAX_CHUNKS_PER_SOURCE = 8;
 
 /** Frequency of cancellation checks (every N chunks). */
 export const CANCELLATION_CHECK_INTERVAL = 3;
+
+/** Maximum number of successful guide generations per user, per calendar month. */
+export const MAX_MONTHLY_GENERATIONS = 30;
+
+/** Progress units reserved for the summary stage. */
+export const SUMMARY_PROGRESS_UNITS = 1;
+
+/** Rate limit window for guide generation and export actions. */
+export const ACTION_RATE_LIMIT_WINDOW_SECONDS = 60;
+
+/** Maximum generation attempts per user within the rate limit window. */
+export const GENERATION_RATE_LIMIT_USER_MAX = 2;
+
+/** Maximum generation attempts per IP within the rate limit window. */
+export const GENERATION_RATE_LIMIT_IP_MAX = 5;
+
+/** Maximum Google Docs exports per user within the rate limit window. */
+export const EXPORT_RATE_LIMIT_USER_MAX = 5;
+
+/** Maximum Google Docs exports per IP within the rate limit window. */
+export const EXPORT_RATE_LIMIT_IP_MAX = 10;

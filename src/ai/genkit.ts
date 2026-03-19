@@ -1,4 +1,4 @@
-import { genkit } from 'genkit';
+import { genkit, type GenerationUsage } from 'genkit';
 import { googleAI } from '@genkit-ai/google-genai';
 
 export const ai = genkit({
@@ -50,12 +50,20 @@ type GenerateTextOptions = {
   preferredModel?: string;
   timeoutMs?: number;
   maxRetries?: number;
+  abortSignal?: AbortSignal;
+};
+
+export type LlmUsage = {
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
 };
 
 type GenerateTextResult = {
   text: string;
   modelUsed: string;
   usedFallback: boolean;
+  usage: LlmUsage;
 };
 
 function sleep(ms: number) {
@@ -92,30 +100,73 @@ function isQuotaExhaustedError(error: unknown): boolean {
   );
 }
 
-async function generateWithTimeout(prompt: string, model: string, timeoutMs: number): Promise<string> {
+function normalizeUsage(usage?: GenerationUsage): LlmUsage {
+  const inputTokens = usage?.inputTokens ?? 0;
+  const outputTokens = usage?.outputTokens ?? 0;
+  const totalTokens = usage?.totalTokens ?? (inputTokens + outputTokens);
+
+  return {
+    inputTokens,
+    outputTokens,
+    totalTokens,
+  };
+}
+
+async function generateWithTimeout(
+  prompt: string,
+  model: string,
+  timeoutMs: number,
+  abortSignal?: AbortSignal,
+): Promise<{ text: string; usage: LlmUsage }> {
+  const controller = new AbortController();
   let timedOut = false;
-  const generationPromise = ai.generate({
-    model: googleAI.model(model),
-    prompt,
-  });
+  let abortedByCaller = false;
 
-  const timeoutPromise = new Promise<never>((_, reject) => {
-    setTimeout(() => {
-      timedOut = true;
-      reject(new Error(`LLM timeout after ${timeoutMs}ms (${model})`));
-    }, timeoutMs);
-  });
+  const timeoutHandle = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, timeoutMs);
 
-  const response = await Promise.race([generationPromise, timeoutPromise]);
+  const handleExternalAbort = () => {
+    abortedByCaller = true;
+    controller.abort();
+  };
 
-  // Log if the underlying LLM call completes after timeout (fire-and-forget leak).
-  generationPromise.then(() => {
-    if (timedOut) {
-      console.warn(`[LLM-Leak] Generation for model "${model}" completed after timeout. Tokens were consumed but result discarded.`);
+  if (abortSignal) {
+    if (abortSignal.aborted) {
+      handleExternalAbort();
+    } else {
+      abortSignal.addEventListener('abort', handleExternalAbort, { once: true });
     }
-  }).catch(() => { /* already handled */ });
+  }
 
-  return (response.text ?? '').trim();
+  try {
+    const response = await ai.generate({
+      model: googleAI.model(model),
+      prompt,
+      abortSignal: controller.signal,
+    });
+
+    return {
+      text: (response.text ?? '').trim(),
+      usage: normalizeUsage(response.usage),
+    };
+  } catch (error) {
+    if (timedOut) {
+      throw new Error(`LLM timeout after ${timeoutMs}ms (${model})`);
+    }
+
+    if (abortedByCaller) {
+      throw new Error(`LLM request aborted (${model})`);
+    }
+
+    throw error;
+  } finally {
+    clearTimeout(timeoutHandle);
+    if (abortSignal) {
+      abortSignal.removeEventListener('abort', handleExternalAbort);
+    }
+  }
 }
 
 export async function generateTextWithFallback(options: GenerateTextOptions): Promise<GenerateTextResult> {
@@ -128,11 +179,17 @@ export async function generateTextWithFallback(options: GenerateTextOptions): Pr
   for (const model of candidates) {
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
-        const text = await generateWithTimeout(options.prompt, model, timeoutMs);
+        const { text, usage } = await generateWithTimeout(
+          options.prompt,
+          model,
+          timeoutMs,
+          options.abortSignal,
+        );
         return {
           text,
           modelUsed: model,
           usedFallback: model !== primary,
+          usage,
         };
       } catch (error) {
         lastError = error;

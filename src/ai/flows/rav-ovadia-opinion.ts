@@ -18,9 +18,16 @@ const RavOvadiaOpinionInputSchema = z.object({
 
 export type RavOvadiaOpinionInput = z.infer<typeof RavOvadiaOpinionInputSchema>;
 
+const UsageSchema = z.object({
+  inputTokens: z.number().default(0),
+  outputTokens: z.number().default(0),
+  totalTokens: z.number().default(0),
+});
+
 const RavOvadiaOpinionOutputSchema = z.object({
   opinion: z.string().describe('Rav Ovadia Yosef\'s ruling in Hebrew.'),
   modelUsed: z.string(),
+  usage: UsageSchema,
 });
 
 export type RavOvadiaOpinionOutput = z.infer<typeof RavOvadiaOpinionOutputSchema>;
@@ -75,6 +82,7 @@ export const ravOvadiaOpinionFlow = ai.defineFlow(
     return {
       opinion: generated.text.trim(),
       modelUsed: generated.modelUsed,
+      usage: generated.usage,
     };
   },
 );

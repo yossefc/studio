@@ -1,52 +1,99 @@
-/**
- * @fileOverview Helper for estimating AI costs and tracking performance metrics.
- */
+export interface UsageSnapshot {
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+}
 
-export interface UsageMetrics {
+export interface UsageMetrics extends UsageSnapshot {
   modelName: string;
   chunkCount: number;
   durationMs: number;
   cacheHits: number;
+  estimatedCostUsd?: number;
 }
 
-/**
- * Estimates the cost of a generation session in USD.
- * Accounts for both input (prompt + source) and output (explanation) tokens.
- * Pricing (Approximate per million tokens, as of 2025):
- * - Gemini 2.5 Pro:        $1.25 input / $10.00 output
- * - Gemini 2.5 Flash:      $0.15 input / $0.60 output
- * - Gemini 2.5 Flash-Lite: $0.075 input / $0.30 output
- */
-export function estimateCost(metrics: UsageMetrics): number {
-  const model = metrics.modelName.toLowerCase();
-  const generatedChunks = Math.max(metrics.chunkCount - metrics.cacheHits, 0);
+const TOKEN_PRICING_USD_PER_MILLION: Record<string, { input: number; output: number }> = {
+  'googleai/gemini-2.5-flash-lite': { input: 0.1, output: 0.4 },
+  'googleai/gemini-2.5-flash': { input: 0.3, output: 2.5 },
+  'googleai/gemini-2.5-pro': { input: 1.25, output: 10 },
+};
 
-  // Estimate: ~2000 input tokens (prompt + context + source text) + ~1000 output tokens per chunk.
-  const inputTokens = generatedChunks * 2000;
-  const outputTokens = generatedChunks * 1000;
+export function normalizeUsage(usage?: Partial<UsageSnapshot> | null): UsageSnapshot {
+  const inputTokens = usage?.inputTokens ?? 0;
+  const outputTokens = usage?.outputTokens ?? 0;
+  const totalTokens = usage?.totalTokens ?? (inputTokens + outputTokens);
 
-  let inputRate = 1.25;
-  let outputRate = 10.0;
-  if (model.includes('flash-lite')) {
-    inputRate = 0.075;
-    outputRate = 0.30;
-  } else if (model.includes('flash')) {
-    inputRate = 0.15;
-    outputRate = 0.60;
-  } else if (model.includes('2.5-pro')) {
-    inputRate = 1.25;
-    outputRate = 10.0;
+  return {
+    inputTokens,
+    outputTokens,
+    totalTokens,
+  };
+}
+
+export function addUsage(
+  left?: Partial<UsageSnapshot> | null,
+  right?: Partial<UsageSnapshot> | null,
+): UsageSnapshot {
+  const normalizedLeft = normalizeUsage(left);
+  const normalizedRight = normalizeUsage(right);
+
+  return {
+    inputTokens: normalizedLeft.inputTokens + normalizedRight.inputTokens,
+    outputTokens: normalizedLeft.outputTokens + normalizedRight.outputTokens,
+    totalTokens: normalizedLeft.totalTokens + normalizedRight.totalTokens,
+  };
+}
+
+function getPricing(modelName: string): { input: number; output: number } {
+  if (TOKEN_PRICING_USD_PER_MILLION[modelName]) {
+    return TOKEN_PRICING_USD_PER_MILLION[modelName];
   }
 
-  return (inputTokens / 1_000_000) * inputRate + (outputTokens / 1_000_000) * outputRate;
+  if (modelName.includes('flash-lite')) {
+    return TOKEN_PRICING_USD_PER_MILLION['googleai/gemini-2.5-flash-lite'];
+  }
+
+  if (modelName.includes('flash')) {
+    return TOKEN_PRICING_USD_PER_MILLION['googleai/gemini-2.5-flash'];
+  }
+
+  return TOKEN_PRICING_USD_PER_MILLION['googleai/gemini-2.5-pro'];
 }
 
-export function logGenerationMetrics(metrics: UsageMetrics) {
-  const cost = estimateCost(metrics);
-  const safeChunkCount = Math.max(metrics.chunkCount, 1);
-  console.info('[TalmudAI-Metrics]', {
-    ...metrics,
-    estimatedCostUsd: cost.toFixed(6),
-    avgMsPerChunk: (metrics.durationMs / safeChunkCount).toFixed(0),
-  });
+export function estimateTokenCostUsd(
+  modelName: string,
+  usage?: Partial<UsageSnapshot> | null,
+): number {
+  const normalizedUsage = normalizeUsage(usage);
+  const pricing = getPricing(modelName);
+
+  return (
+    (normalizedUsage.inputTokens / 1_000_000) * pricing.input
+    + (normalizedUsage.outputTokens / 1_000_000) * pricing.output
+  );
+}
+
+export function estimateCost(modelName: string, usage?: Partial<UsageSnapshot> | null): number {
+  return estimateTokenCostUsd(modelName, usage);
+}
+
+export function logGenerationMetrics(metrics: UsageMetrics): void {
+  const {
+    modelName,
+    chunkCount,
+    durationMs,
+    cacheHits,
+    inputTokens,
+    outputTokens,
+    totalTokens,
+    estimatedCostUsd,
+  } = metrics;
+
+  const costPart = typeof estimatedCostUsd === 'number'
+    ? ` estimatedCostUsd=${estimatedCostUsd.toFixed(6)}`
+    : '';
+
+  console.log(
+    `[Metrics] model=${modelName} chunks=${chunkCount} duration=${durationMs}ms cacheHits=${cacheHits} inputTokens=${inputTokens} outputTokens=${outputTokens} totalTokens=${totalTokens}${costPart}`,
+  );
 }

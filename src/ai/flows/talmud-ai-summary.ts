@@ -16,14 +16,32 @@ const TalmudAISummaryInputSchema = z.object({
 
 export type TalmudAISummaryInput = z.infer<typeof TalmudAISummaryInputSchema>;
 
+const UsageSchema = z.object({
+  inputTokens: z.number().default(0),
+  outputTokens: z.number().default(0),
+  totalTokens: z.number().default(0),
+});
+
 const TalmudAISummaryOutputSchema = z.object({
   summary: z.string().describe('Concise, structured summary in Hebrew.'),
   modelUsed: z.string(),
   validated: z.boolean().default(true),
   validationErrors: z.array(z.string()).optional(),
+  usage: UsageSchema,
 });
 
 export type TalmudAISummaryOutput = z.infer<typeof TalmudAISummaryOutputSchema>;
+
+function mergeUsage(
+  left: TalmudAISummaryOutput['usage'],
+  right: TalmudAISummaryOutput['usage'],
+): TalmudAISummaryOutput['usage'] {
+  return {
+    inputTokens: (left.inputTokens ?? 0) + (right.inputTokens ?? 0),
+    outputTokens: (left.outputTokens ?? 0) + (right.outputTokens ?? 0),
+    totalTokens: (left.totalTokens ?? 0) + (right.totalTokens ?? 0),
+  };
+}
 
 function validateSummary(text: string, isTorahOhr: boolean = false): { valid: boolean; errors: string[] } {
   const errors: string[] = [];
@@ -208,6 +226,7 @@ export const talmudAISummaryFlow = ai.defineFlow(
     let summary = normalizeSummaryFormat(stripMetaPrefix(generated.text));
     let modelUsed = generated.modelUsed;
     let validation = validateSummary(summary, isTorahOhr);
+    let usage = generated.usage;
 
     if (!validation.valid) {
       const repairPrompt = `הסיכום הבא אינו תקין: ${validation.errors.join(', ')}.
@@ -229,6 +248,7 @@ ${summary}
       summary = normalizeSummaryFormat(stripMetaPrefix(repaired.text));
       modelUsed = repaired.modelUsed;
       validation = validateSummary(summary, isTorahOhr);
+      usage = mergeUsage(usage, repaired.usage);
     }
 
     return {
@@ -236,6 +256,7 @@ ${summary}
       modelUsed,
       validated: validation.valid,
       validationErrors: validation.errors,
+      usage,
     };
   }
 );

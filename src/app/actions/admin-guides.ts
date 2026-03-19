@@ -1,16 +1,7 @@
 'use server';
 
 import { getAdminDb } from '@/server/firebase-admin';
-import { getAdminAuth } from '@/server/firebase-admin';
-
-const ADMIN_EMAIL = 'yossefcohzar@gmail.com';
-
-async function verifyAdmin(idToken: string): Promise<void> {
-    const decoded = await getAdminAuth().verifyIdToken(idToken);
-    if (decoded.email !== ADMIN_EMAIL) {
-        throw new Error('Unauthorized: admin access required.');
-    }
-}
+import { verifyAdmin } from './admin-auth';
 
 /* ---- Rabanout types ---- */
 

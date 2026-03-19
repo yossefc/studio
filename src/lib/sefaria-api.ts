@@ -801,3 +801,27 @@ export function normalizeTref(tref: string): string {
 
   return normalized;
 }
+
+export async function fetchSefariaTopicsForRef(tref: string): Promise<string[]> {
+  try {
+    const normalized = normalizeTref(tref);
+    const url = `https://www.sefaria.org/api/related/${encodeURIComponent(normalized)}`;
+    const res = await fetch(url, { next: { revalidate: 86400 } });
+    if (!res.ok) return [];
+    const data: unknown = await res.json();
+    if (!data || typeof data !== 'object') return [];
+    const topics = (data as Record<string, unknown>).topics;
+    if (!Array.isArray(topics)) return [];
+    return topics
+      .map((t: unknown) => {
+        if (!t || typeof t !== 'object') return null;
+        const topicObj = t as Record<string, unknown>;
+        const heTitle = typeof topicObj.he === 'string' ? topicObj.he.trim() : null;
+        return heTitle && heTitle.length > 0 ? heTitle : null;
+      })
+      .filter((name): name is string => name !== null)
+      .slice(0, 3);
+  } catch {
+    return [];
+  }
+}

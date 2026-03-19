@@ -18,8 +18,9 @@ import { getSimanOptions, getSeifOptions, type SimanOption, type SeifOption } fr
 import type { SourceKey } from '@/lib/sefaria-api';
 import { hebrewToNumber } from '@/lib/hebrew-utils';
 import { useRouter } from 'next/navigation';
-import { useFirestore, useUser, useAuth } from '@/firebase';
+import { useFirestore, useUser } from '@/firebase';
 import { doc, setDoc, updateDoc, onSnapshot, collection, query, orderBy, getDocs } from 'firebase/firestore';
+import { syncFirebaseSession } from '@/firebase/session-sync';
 
 interface StudyGuideEntity {
   id: string;
@@ -168,10 +169,9 @@ export default function GeneratePage() {
 
   const callGenerateWithRetry = async (
     request: Parameters<typeof generateMultiSourceStudyGuide>[0],
-    userId: string,
     guideId: string,
   ): Promise<GenerationResult> => {
-    return await generateMultiSourceStudyGuide(request, userId, guideId);
+    return await generateMultiSourceStudyGuide(request, guideId);
   };
 
   type SummarySection = { title: string; paragraphs: string[]; items: string[] };
@@ -195,7 +195,6 @@ export default function GeneratePage() {
     }, []);
 
   const { user, isUserLoading } = useUser();
-  const auth = useAuth();
   const firestore = useFirestore();
   const router = useRouter();
 
@@ -463,6 +462,7 @@ export default function GeneratePage() {
     const guideRef = doc(firestore, 'users', user.uid, 'studyGuides', studyGuideId);
     const now = new Date().toISOString();
     try {
+      await syncFirebaseSession(user);
       await setDoc(guideRef, {
         id: studyGuideId,
         userId: user.uid,
@@ -483,7 +483,6 @@ export default function GeneratePage() {
           manualByText: selectedSources.includes('beit_yosef') ? manualByText : undefined,
           manualMbText: selectedSources.includes('mishnah_berurah') ? manualMbText : undefined,
         },
-        user.uid,
         studyGuideId,
       );
       if (result.cancelled) { setStatus('idle'); return; }
@@ -534,6 +533,7 @@ export default function GeneratePage() {
     if (!guide || !user || !firestore) return;
     setStatus('exporting');
     setError('');
+    await syncFirebaseSession(user);
     const result = await exportToGoogleDocs(guide.tref, previewSummary, previewSourceResults);
     if (result.success && result.googleDocId && result.googleDocUrl) {
       const guideRef = doc(firestore, 'users', user.uid, 'studyGuides', guide.id);

@@ -26,7 +26,9 @@ import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useCollection, useFirestore, useMemoFirebase, useUser } from '@/firebase';
+import { syncFirebaseSession } from '@/firebase/session-sync';
 import { hebrewToNumber, numberToHebrew } from '@/lib/hebrew-utils';
+import { normalizeTref } from '@/lib/sefaria-api';
 import type { SourceKey } from '@/lib/sefaria-api';
 import { cn } from '@/lib/utils';
 
@@ -40,6 +42,8 @@ interface StudyGuideEntity {
   status?: string;
   createdAt: string;
   rating?: number;
+  topics?: string[];
+  sefariaRef?: string;
 }
 
 type GuideRecord = StudyGuideEntity & { id: string };
@@ -121,12 +125,11 @@ async function fetchSimanSubjectsForSection(bookTitle: string): Promise<Record<n
     const data: unknown = await res.json();
     if (!data || typeof data !== 'object') return {};
     const subjects: Record<number, string> = {};
-    const altStructs = (data as Record<string, unknown>).alt_structs;
-    if (!altStructs || typeof altStructs !== 'object') return subjects;
-    const structKey = Object.keys(altStructs as object)[0];
-    if (!structKey) return subjects;
-    const struct = (altStructs as Record<string, unknown>)[structKey];
-    const nodes = Array.isArray((struct as Record<string, unknown>)?.nodes)
+        const alts = (data as Record<string, unknown>).alts;
+    const altObj = alts && typeof alts === 'object' ? alts as Record<string, unknown> : null;
+    const structKey = altObj ? Object.keys(altObj)[0] : null;
+    const struct = structKey && altObj ? altObj[structKey] : null;
+    const nodes = Array.isArray((struct as Record<string, unknown> | null)?.nodes)
       ? ((struct as Record<string, unknown>).nodes as unknown[])
       : [];
     for (const node of nodes) {
@@ -163,6 +166,12 @@ async function fetchSimanSubjectsForSection(bookTitle: string): Promise<Record<n
   } catch {
     return {};
   }
+}
+
+function extractFirstTopic(summaryText: string): string {
+  if (!summaryText) return '';
+  const match = summaryText.match(/^##\s+(.+)$/m);
+  return match ? match[1].trim() : '';
 }
 
 const SOURCE_LABELS: Record<string, string> = {
@@ -379,6 +388,7 @@ export default function MyGuidesPage() {
   const [isEditingSummary, setIsEditingSummary] = useState(false);
   const [editedSummaryText, setEditedSummaryText] = useState('');
   const [isSavingSummary, setIsSavingSummary] = useState(false);
+  const [clientTopics, setClientTopics] = useState<Record<string, string[]>>({});
 
   // Inject print-override CSS and trigger print when printAllData is ready
   useEffect(() => {
@@ -455,6 +465,45 @@ export default function MyGuidesPage() {
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hierarchy]);
+
+  // Backfill topics for old guides that don't have them in Firestore
+  useEffect(() => {
+    if (!guides || !user || !firestore) return;
+    const guidesWithoutTopics = guides.filter(g => !g.topics || g.topics.length === 0);
+    if (guidesWithoutTopics.length === 0) return;
+
+    guidesWithoutTopics.forEach((guide) => {
+      const rawRef = guide.sefariaRef || guide.tref;
+      if (!rawRef) return;
+      const ref = normalizeTref(rawRef);
+      fetch(`https://www.sefaria.org/api/related/${encodeURIComponent(ref)}`)
+        .then(res => res.ok ? res.json() : null)
+        .then((data: unknown) => {
+          if (!data || typeof data !== 'object') return;
+          const topicsArr = (data as Record<string, unknown>).topics;
+          if (!Array.isArray(topicsArr) || topicsArr.length === 0) return;
+          const names: string[] = topicsArr
+            .map((t: unknown) => {
+              if (!t || typeof t !== 'object') return null;
+              const obj = t as Record<string, unknown>;
+              const direct = typeof obj.he === 'string' ? obj.he.trim() : '';
+              const nested = obj.title && typeof obj.title === 'object'
+                ? ((obj.title as Record<string, unknown>).he ?? '')
+                : '';
+              const name = direct || (typeof nested === 'string' ? nested.trim() : '');
+              return name.length > 0 ? name : null;
+            })
+            .filter((n): n is string => n !== null)
+            .slice(0, 3);
+          if (names.length === 0) return;
+          setClientTopics(prev => ({ ...prev, [guide.id]: names }));
+          const guideRef = doc(firestore, 'users', user.uid, 'studyGuides', guide.id);
+          updateDoc(guideRef, { topics: names }).catch(() => { /* ignore */ });
+        })
+        .catch(() => { /* ignore */ });
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [guides]);
 
   const totalSimanim = useMemo(
     () => hierarchy.reduce((sum, section) => sum + section.simanim.length, 0),
@@ -603,7 +652,8 @@ export default function MyGuidesPage() {
     setIsExportAllLoading(true);
     setExportError(null);
     try {
-      const result = await exportAllGuidesToGoogleDocs(user.uid, guidesToExport.map((g) => g.id));
+      await syncFirebaseSession(user);
+      const result = await exportAllGuidesToGoogleDocs(guidesToExport.map((g) => g.id));
       if (result.success && result.googleDocUrl) {
         window.open(result.googleDocUrl, '_blank');
       } else {
@@ -625,8 +675,8 @@ export default function MyGuidesPage() {
     try {
       const activeParsed = parseTref(activeGuide.tref);
       const simanLabel = activeParsed.simanRaw || String(activeParsed.simanNum);
+      await syncFirebaseSession(user);
       const result = await exportSimanSummariesToGoogleDocs(
-        user.uid,
         simanGuides.map((g) => g.id),
         simanLabel,
       );
@@ -775,7 +825,7 @@ export default function MyGuidesPage() {
                               <div className="flex min-w-0 flex-col">
                                 <span className="text-sm font-medium text-gray-800">סימן {simanLabel}</span>
                                 {subject && (
-                                  <span className="truncate text-[10px] leading-tight text-gray-400">{subject}</span>
+                                  <span className="truncate text-[11px] leading-tight text-gray-500">{subject}</span>
                                 )}
                               </div>
                             </div>
@@ -802,11 +852,16 @@ export default function MyGuidesPage() {
                                   type="button"
                                   onClick={() => openGuide(entry.guide)}
                                   className={cn(
-                                    'flex-1 truncate text-right text-sm',
-                                    isActive ? 'font-medium text-white' : 'text-gray-700',
+                                    'flex flex-1 flex-col items-stretch',
+                                    isActive ? 'text-white' : 'text-gray-700',
                                   )}
                                 >
-                                  {label}
+                                  <span className={cn('w-full truncate text-right text-sm', isActive && 'font-medium')}>{label}</span>
+                                  {subject && (
+                                    <span className={cn('w-full truncate text-right text-[10px] leading-tight', isActive ? 'text-white/60' : 'text-gray-400')}>
+                                      {subject}
+                                    </span>
+                                  )}
                                 </button>
                                 <div className={cn(
                                   'flex shrink-0 items-center gap-0.5',
