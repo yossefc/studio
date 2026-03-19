@@ -82,7 +82,7 @@ export interface GenerationResult {
 }
 
 const CANONICAL_COLLECTION = 'canonicalStudyGuides';
-const CANONICAL_CACHE_VERSION = 'v8';
+const CANONICAL_CACHE_VERSION = 'v9';
 const CANONICAL_LOCK_STALE_MS = 10 * 60 * 1000;
 const CANONICAL_READY_WAIT_ATTEMPTS = 20;
 const CANONICAL_READY_WAIT_MS = 1500;
@@ -707,18 +707,24 @@ async function fetchSourceWithStrategy(
 
         if (refs.length > 0) {
           const segments = await fetchSegmentsFromRefs(request, sourceKey, refs);
-          return {
-            sourceKey,
-            tref: refs[0] || fallbackRef,
-            data: responseWithSegments({
-              ref: refs[0] || fallbackRef,
-              he: [],
-              segments: [],
-              en: [],
-              direction: 'rtl',
-            }, segments),
-            fetchMode: 'linked-passages',
-          };
+          if (segments.length > 0) {
+            return {
+              sourceKey,
+              tref: refs[0] || fallbackRef,
+              data: responseWithSegments({
+                ref: refs[0] || fallbackRef,
+                he: [],
+                segments: [],
+                en: [],
+                direction: 'rtl',
+              }, segments),
+              fetchMode: 'linked-passages',
+            };
+          }
+
+          console.warn(
+            `[Action] beit_yosef: direct Sefaria links resolved but returned no usable text for ${request.section} ${simanNum}:${seifNum}, trying alignment cache...`,
+          );
         }
 
         // No direct Sefaria links — fall through to alignment cache (which uses LLM alignment)
@@ -822,20 +828,26 @@ async function fetchSourceWithStrategy(
       const refs = sourceKey === 'tur' ? linked.turRefs : linked.beitYosefRefs;
       if (refs.length > 0) {
         const segments = await fetchSegmentsFromRefs(request, sourceKey, refs);
-        const syntheticData = responseWithSegments({
-          ref: refs[0],
-          he: [],
-          segments: [],
-          en: [],
-          direction: 'rtl',
-        }, segments);
+        if (segments.length > 0) {
+          const syntheticData = responseWithSegments({
+            ref: refs[0],
+            he: [],
+            segments: [],
+            en: [],
+            direction: 'rtl',
+          }, segments);
 
-        return {
-          sourceKey,
-          tref: syntheticData.ref,
-          data: syntheticData,
-          fetchMode: 'linked-passages',
-        };
+          return {
+            sourceKey,
+            tref: syntheticData.ref,
+            data: syntheticData,
+            fetchMode: 'linked-passages',
+          };
+        }
+
+        console.warn(
+          `[Action] ${sourceKey}: final direct links returned no usable text for ${request.section} ${simanNum}:${seifNum}, falling back to full siman fetch.`,
+        );
       }
     } catch (linksError) {
       console.warn(`[Action] Direct links fallback failed for ${sourceKey}:`, linksError);
