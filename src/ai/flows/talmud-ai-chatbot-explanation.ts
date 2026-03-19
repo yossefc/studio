@@ -33,7 +33,6 @@ const TalmudAIChatbotExplanationInputSchema = z.object({
   chunkOrder: z.number().describe('The sequential order of this chunk.'),
   rawHash: z.string().describe('A hash of the current segment text.'),
   sourceKey: z.string().default('shulchan_arukh').describe('The source type: tur, beit_yosef, shulchan_arukh, torah_ohr.'),
-  companionText: z.string().optional().describe('Mishnah Berurah text to integrate alongside SA explanation.'),
 });
 
 export type TalmudAIChatbotExplanationInput = z.infer<typeof TalmudAIChatbotExplanationInputSchema>;
@@ -299,7 +298,7 @@ export const talmudAIChatbotExplanationFlow = ai.defineFlow(
 
     const sourceLabel = SOURCE_LABELS[input.sourceKey] || 'שולחן ערוך';
 
-    const companionSection = input.companionText
+    const companionSection = ''; /*
       ? `תוספת מן המשנה ברורה:
 ${input.companionText}
 
@@ -309,7 +308,7 @@ ${input.companionText}
 - הסתייגויות והגבלות,
 - נקודות מעשיות ונפקא מינות,
 - ואם ידוע מן הטקסט, גם ציון ס"ק.`
-      : '';
+      : ''; */
 
     const beitYosefAddition = input.sourceKey === 'beit_yosef'
       ? `הוראה נוספת לבית יוסף:

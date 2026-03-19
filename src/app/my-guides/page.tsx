@@ -389,6 +389,9 @@ export default function MyGuidesPage() {
   const [editedSummaryText, setEditedSummaryText] = useState('');
   const [isSavingSummary, setIsSavingSummary] = useState(false);
   const [clientTopics, setClientTopics] = useState<Record<string, string[]>>({});
+  const [summaryWidth, setSummaryWidth] = useState(256);
+  const summaryTextareaRef = useRef<HTMLTextAreaElement>(null);
+  const summaryResizeRef = useRef<{ startX: number; startW: number } | null>(null);
 
   // Inject print-override CSS and trigger print when printAllData is ready
   useEffect(() => {
@@ -596,6 +599,24 @@ export default function MyGuidesPage() {
     setIsEditingSummary(false);
     setEditedSummaryText('');
   }, []);
+
+  const insertFormat = useCallback((prefix: string, suffix = '') => {
+    const el = summaryTextareaRef.current;
+    if (!el) return;
+    const start = el.selectionStart;
+    const end = el.selectionEnd;
+    const selected = editedSummaryText.slice(start, end);
+    const before = editedSummaryText.slice(0, start);
+    const after = editedSummaryText.slice(end);
+    const insertion = prefix + (selected || '') + suffix;
+    const newText = before + insertion + after;
+    setEditedSummaryText(newText);
+    setTimeout(() => {
+      el.focus();
+      const cursor = start + prefix.length + (selected || '').length + suffix.length;
+      el.setSelectionRange(cursor, cursor);
+    }, 0);
+  }, [editedSummaryText, summaryTextareaRef]);
 
   const saveSummary = useCallback(async () => {
     if (!user || !firestore || !activeGuide) return;
@@ -1061,7 +1082,33 @@ export default function MyGuidesPage() {
                     </div>
 
                     {/* Summary column */}
-                    <aside className="flex w-64 shrink-0 flex-col overflow-hidden border-r border-gray-200 print:block" dir="rtl">
+                    <aside
+                      className="relative flex shrink-0 flex-col overflow-hidden border-r border-gray-200 print:block"
+                      style={{ width: summaryWidth }}
+                      dir="rtl"
+                    >
+                      {/* Drag-to-resize handle */}
+                      <div
+                        className="group absolute bottom-0 right-0 top-0 z-10 flex w-3 cursor-col-resize items-center justify-center"
+                        onMouseDown={(e) => {
+                          e.preventDefault();
+                          summaryResizeRef.current = { startX: e.clientX, startW: summaryWidth };
+                          const onMove = (ev: globalThis.MouseEvent) => {
+                            if (!summaryResizeRef.current) return;
+                            const delta = ev.clientX - summaryResizeRef.current.startX;
+                            setSummaryWidth(Math.max(200, Math.min(700, summaryResizeRef.current.startW + delta)));
+                          };
+                          const onUp = () => {
+                            summaryResizeRef.current = null;
+                            window.removeEventListener('mousemove', onMove);
+                            window.removeEventListener('mouseup', onUp);
+                          };
+                          window.addEventListener('mousemove', onMove);
+                          window.addEventListener('mouseup', onUp);
+                        }}
+                      >
+                        <div className="h-16 w-0.5 rounded-full bg-gray-300 transition-colors group-hover:bg-blue-400 group-active:bg-blue-500" />
+                      </div>
                       {/* Header */}
                       <div className="flex shrink-0 items-center justify-between border-b border-gray-100 px-4 py-2">
                         <p className="text-[11px] font-semibold uppercase tracking-wider text-gray-400">
@@ -1127,9 +1174,21 @@ export default function MyGuidesPage() {
                         )}
                       </div>
 
+                      {/* Formatting toolbar - only in edit mode */}
+                      {isEditingSummary && (
+                        <div className="flex shrink-0 items-center gap-0.5 border-b border-gray-100 bg-gray-50 px-2 py-1" dir="ltr">
+                          <button type="button" onClick={() => insertFormat('\n## ', '')} className="rounded px-1.5 py-0.5 text-[11px] font-bold text-gray-500 hover:bg-gray-200 hover:text-gray-800" title="כותרת">##</button>
+                          <button type="button" onClick={() => insertFormat('**', '**')} className="rounded px-1.5 py-0.5 text-[11px] font-bold text-gray-500 hover:bg-gray-200 hover:text-gray-800" title="מודגש">B</button>
+                          <button type="button" onClick={() => insertFormat('\n- ', '')} className="rounded px-1.5 py-0.5 text-[11px] text-gray-500 hover:bg-gray-200 hover:text-gray-800" title="נקודה">•—</button>
+                          <div className="mx-1 h-3 w-px bg-gray-300" />
+                          <button type="button" onClick={() => insertFormat('\n---\n', '')} className="rounded px-1.5 py-0.5 text-[11px] text-gray-500 hover:bg-gray-200 hover:text-gray-800" title="קו הפרדה">—</button>
+                        </div>
+                      )}
+
                       {/* Content: edit mode or read mode */}
                       {isEditingSummary ? (
                         <textarea
+                          ref={summaryTextareaRef}
                           value={editedSummaryText}
                           onChange={(e) => setEditedSummaryText(e.target.value)}
                           className="flex-1 resize-none p-4 font-sefer text-sm leading-7 text-gray-800 focus:outline-none"

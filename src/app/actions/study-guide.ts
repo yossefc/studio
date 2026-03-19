@@ -873,7 +873,6 @@ async function processSourceChunks(
   modelName: string,
   userId: string,
   guideId: string,
-  companionText: string | undefined,
   passagesOnlyMode: boolean,
   onChunkDone?: () => void,
 ): Promise<{ chunks: ProcessedChunk[]; cacheHits: number; cancelled: boolean; usageTotals: UsageTotals }> {
@@ -916,7 +915,6 @@ async function processSourceChunks(
         chunkOrder: i,
         rawHash,
         sourceKey,
-        companionText: sourceKey === 'shulchan_arukh' ? companionText : undefined,
       });
       if (llmResult.cacheHit) cacheHits += 1;
       usageTotals = addUsageTotals(usageTotals, llmResult.modelUsed, llmResult.usage);
@@ -1044,7 +1042,7 @@ export async function generateMultiSourceStudyGuide(
       .filter(s => s !== 'mishnah_berurah' && s !== 'rav_ovadia') // MB and Rav Ovadia are handled separately
       .map(sourceKey => fetchSourceWithStrategy(request, sourceKey));
 
-    // Also fetch Mishnah Berurah if selected (as companion for SA).
+    // Also fetch Mishnah Berurah if selected as its own source.
     // If manualMbText is provided, use it directly without a Sefaria fetch.
     const hasMb = request.sources.includes('mishnah_berurah');
     const mbSyntheticRef = `Mishnah Berurah (Saisie Manuelle) - ${request.section} ${request.siman}:${request.seif || ''}`.trim();
@@ -1074,7 +1072,7 @@ export async function generateMultiSourceStudyGuide(
       mbPromise,
     ]);
 
-    // Prepare MB companion text.
+    // Prepare MB text for flows that explicitly need it (for example Rav Ovadia).
     const companionText = mbData
       ? (Array.isArray(mbData.he) ? mbData.he : []).join(' ').trim() || undefined
       : undefined;
@@ -1201,7 +1199,6 @@ export async function generateMultiSourceStudyGuide(
           modelToUse,
           userId,
           guideId,
-          companionText,
           !!request.torahOhrPassagesOnly,
           reportProgress,
         );
@@ -1223,9 +1220,9 @@ export async function generateMultiSourceStudyGuide(
       }
 
       if (result.chunks.length > 0) {
-        const label = sourceKey === 'shulchan_arukh' && companionText
+        const label = config.hebrewLabel; /*
           ? `${config.hebrewLabel} (עם משנה ברורה)`
-          : config.hebrewLabel;
+          : config.hebrewLabel; */
 
         sourceResults.push({
           sourceKey,
@@ -1252,7 +1249,6 @@ export async function generateMultiSourceStudyGuide(
           modelToUse,
           userId,
           guideId,
-          undefined,
           false,
           reportProgress,
         );
