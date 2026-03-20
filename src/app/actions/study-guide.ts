@@ -34,6 +34,8 @@ import { createHash } from 'crypto';
 import { getAuthenticatedUser } from '@/lib/server-auth';
 import { assertActionRateLimit, getRequestIpAddress } from '@/lib/rate-limit';
 import { getUserUsagePolicy } from '@/lib/usage-policy';
+import { ADMIN_EMAIL } from './admin-auth';
+import { isFreeTierContent } from '@/lib/free-tier';
 
 export interface ProcessedChunk {
   id: string;
@@ -159,6 +161,15 @@ async function assertMonthlyQuotaAvailable(userId: string, monthlyLimit: number)
   if (usageSnap.size >= monthlyLimit) {
     throw new Error(`Monthly generation quota reached (${monthlyLimit}).`);
   }
+}
+
+async function getSubscriptionStatusFromDb(uid: string): Promise<{ isActive: boolean }> {
+  const db = getAdminDb();
+  const snap = await db
+    .collection('users').doc(uid)
+    .collection('subscriptionStatus').doc('current')
+    .get();
+  return { isActive: Boolean(snap.exists && snap.data()?.isActive) };
 }
 
 async function recordUsageLedgerEntry(
@@ -980,25 +991,39 @@ export async function generateMultiSourceStudyGuide(
   let hasCanonicalLock = false;
 
   try {
-    const authUser = await getAuthenticatedUser();
-    userId = authUser.uid;
-    const ipAddress = await getRequestIpAddress();
-    const usagePolicy = await getUserUsagePolicy({
-      uid: authUser.uid,
-      email: authUser.email,
-    });
+    const freeTier = isFreeTierContent(request.section, request.siman, request.seif);
 
-    if (!usagePolicy.unlimited) {
-      await assertActionRateLimit({
-        action: 'study-guide-generation',
-        userId,
-        ipAddress,
-        windowSeconds: ACTION_RATE_LIMIT_WINDOW_SECONDS,
-        userLimit: usagePolicy.generationRateLimitUserMax,
-        ipLimit: GENERATION_RATE_LIMIT_IP_MAX,
+    if (!freeTier) {
+      const authUser = await getAuthenticatedUser();
+      userId = authUser.uid;
+
+      // Check active subscription (admin email is always allowed)
+      const isAdmin = (authUser.email ?? '').toLowerCase() === ADMIN_EMAIL.toLowerCase();
+      if (!isAdmin) {
+        const sub = await getSubscriptionStatusFromDb(userId);
+        if (!sub.isActive) {
+          return { success: false, error: 'SUBSCRIPTION_REQUIRED' };
+        }
+      }
+
+      const ipAddress = await getRequestIpAddress();
+      const usagePolicy = await getUserUsagePolicy({
+        uid: authUser.uid,
+        email: authUser.email,
       });
 
-      await assertMonthlyQuotaAvailable(userId, usagePolicy.monthlyGenerationLimit);
+      if (!usagePolicy.unlimited) {
+        await assertActionRateLimit({
+          action: 'study-guide-generation',
+          userId,
+          ipAddress,
+          windowSeconds: ACTION_RATE_LIMIT_WINDOW_SECONDS,
+          userLimit: usagePolicy.generationRateLimitUserMax,
+          ipLimit: GENERATION_RATE_LIMIT_IP_MAX,
+        });
+
+        await assertMonthlyQuotaAvailable(userId, usagePolicy.monthlyGenerationLimit);
+      }
     }
 
     let canonicalState = await tryAcquireCanonicalLock(canonicalCacheKey, request);
@@ -1006,13 +1031,15 @@ export async function generateMultiSourceStudyGuide(
     if (canonicalState === 'ready') {
       const cachedGuide = await loadCanonicalGuide(canonicalCacheKey);
       if (cachedGuide) {
-        await persistGuideResultForUser(userId, guideId, cachedGuide);
-        await recordUsageLedgerEntry(
-          userId,
-          guideId,
-          createEmptyUsageTotals(),
-          cachedGuide.summaryModel || 'canonical-cache',
-        );
+        if (userId) {
+          await persistGuideResultForUser(userId, guideId, cachedGuide);
+          await recordUsageLedgerEntry(
+            userId,
+            guideId,
+            createEmptyUsageTotals(),
+            cachedGuide.summaryModel || 'canonical-cache',
+          );
+        }
         return { success: true, guideData: cachedGuide };
       }
       canonicalState = await tryAcquireCanonicalLock(canonicalCacheKey, request);
@@ -1021,13 +1048,15 @@ export async function generateMultiSourceStudyGuide(
     if (canonicalState === 'wait') {
       const waitedGuide = await waitForCanonicalGuide(canonicalCacheKey);
       if (waitedGuide) {
-        await persistGuideResultForUser(userId, guideId, waitedGuide);
-        await recordUsageLedgerEntry(
-          userId,
-          guideId,
-          createEmptyUsageTotals(),
-          waitedGuide.summaryModel || 'canonical-cache',
-        );
+        if (userId) {
+          await persistGuideResultForUser(userId, guideId, waitedGuide);
+          await recordUsageLedgerEntry(
+            userId,
+            guideId,
+            createEmptyUsageTotals(),
+            waitedGuide.summaryModel || 'canonical-cache',
+          );
+        }
         return { success: true, guideData: waitedGuide };
       }
 
@@ -1035,13 +1064,15 @@ export async function generateMultiSourceStudyGuide(
       if (canonicalState === 'ready') {
         const cachedGuide = await loadCanonicalGuide(canonicalCacheKey);
         if (cachedGuide) {
-          await persistGuideResultForUser(userId, guideId, cachedGuide);
-          await recordUsageLedgerEntry(
-            userId,
-            guideId,
-            createEmptyUsageTotals(),
-            cachedGuide.summaryModel || 'canonical-cache',
-          );
+          if (userId) {
+            await persistGuideResultForUser(userId, guideId, cachedGuide);
+            await recordUsageLedgerEntry(
+              userId,
+              guideId,
+              createEmptyUsageTotals(),
+              cachedGuide.summaryModel || 'canonical-cache',
+            );
+          }
           return { success: true, guideData: cachedGuide };
         }
       }
@@ -1177,19 +1208,23 @@ export async function generateMultiSourceStudyGuide(
 
     // Write total chunk count to Firestore so the client can show a progress bar
     const db = getAdminDb();
-    const guideRef = db.collection('users').doc(userId).collection('studyGuides').doc(guideId);
-    await guideRef.update({
-      progressDone: 0,
-      progressTotal,
-      progressPhase: 'chunks',
-    });
+    const guideRef = userId
+      ? db.collection('users').doc(userId).collection('studyGuides').doc(guideId)
+      : null;
+    if (guideRef) {
+      await guideRef.update({
+        progressDone: 0,
+        progressTotal,
+        progressPhase: 'chunks',
+      });
+    }
 
     // Shared progress counter (atomic via closure since sources run in parallel)
     let progressDone = 0;
     const reportProgress = async () => {
       progressDone += 1;
       try {
-        await guideRef.update({ progressDone });
+        if (guideRef) await guideRef.update({ progressDone });
       } catch { /* ignore progress write errors */ }
     };
 
@@ -1337,7 +1372,7 @@ export async function generateMultiSourceStudyGuide(
 
     // Update progress phase to 'summary'
     try {
-      await guideRef.update({ progressPhase: 'summary' });
+      if (guideRef) await guideRef.update({ progressPhase: 'summary' });
     } catch { /* ignore */ }
 
     const summaryResult: Awaited<ReturnType<typeof summarizeTalmudStudyGuide>> = (request.torahOhrPassagesOnly && request.sources.length === 1 && request.sources[0] === 'torah_ohr')
@@ -1397,11 +1432,13 @@ export async function generateMultiSourceStudyGuide(
       }
     }
 
-    try {
-      await persistGuideResultForUser(userId, guideId, finalGuideData, progressTotal);
-      await recordUsageLedgerEntry(userId, guideId, overallUsageTotals, modelToUse);
-    } catch (userPersistError) {
-      console.warn('[Action] Failed to persist user guide result on server:', userPersistError);
+    if (userId) {
+      try {
+        await persistGuideResultForUser(userId, guideId, finalGuideData, progressTotal);
+        await recordUsageLedgerEntry(userId, guideId, overallUsageTotals, modelToUse);
+      } catch (userPersistError) {
+        console.warn('[Action] Failed to persist user guide result on server:', userPersistError);
+      }
     }
 
     return {
@@ -1428,6 +1465,39 @@ export async function generateMultiSourceStudyGuide(
   }
 }
 
+
+// ---------------------------------------------------------------------------
+// Free-tier public action — no authentication required
+// ---------------------------------------------------------------------------
+
+/**
+ * Loads the guide data for free-tier content (OC Siman 1, Seif 1-3).
+ * Serves from the canonical cache if available; generates and caches on
+ * the first call. Authentication is NOT required.
+ */
+export async function loadFreeTierGuide(
+  request: MultiSourceRequest,
+): Promise<GenerationResult> {
+  if (!isFreeTierContent(request.section, request.siman, request.seif)) {
+    return { success: false, error: 'NOT_FREE_TIER' };
+  }
+
+  if (!request.sources.length) {
+    return { success: false, error: 'יש לבחור לפחות מקור אחד.' };
+  }
+
+  const canonicalCacheKey = buildCanonicalCacheKey(request);
+
+  // Fast path: serve from cache
+  const cached = await loadCanonicalGuide(canonicalCacheKey);
+  if (cached) {
+    return { success: true, guideData: cached };
+  }
+
+  // Cache miss: generate without auth (userId stays '' — nothing persisted to user collection)
+  return generateMultiSourceStudyGuide(request, 'free-tier-preview');
+}
+
 export async function exportToGoogleDocs(
   tref: string,
   summary: string,
@@ -1435,6 +1505,9 @@ export async function exportToGoogleDocs(
 ): Promise<{ success: boolean; googleDocId?: string; googleDocUrl?: string; error?: string }> {
   try {
     const authUser = await getAuthenticatedUser();
+    if ((authUser.email || '').toLowerCase() !== ADMIN_EMAIL.toLowerCase()) {
+      return { success: false, error: 'Unauthorized: summary-only export is available for this account.' };
+    }
     const usagePolicy = await getUserUsagePolicy({
       uid: authUser.uid,
       email: authUser.email,
@@ -1460,6 +1533,54 @@ export async function exportToGoogleDocs(
     return {
       success: false,
       error: 'יצירת מסמך Google Docs נכשלה. בדוק הרשאות גישה לשירות.',
+    };
+  }
+}
+
+export async function exportSummaryToGoogleDocs(
+  tref: string,
+  summary: string,
+): Promise<{ success: boolean; googleDocUrl?: string; error?: string }> {
+  try {
+    const authUser = await getAuthenticatedUser();
+    const usagePolicy = await getUserUsagePolicy({
+      uid: authUser.uid,
+      email: authUser.email,
+    });
+    if (!usagePolicy.unlimited) {
+      await assertActionRateLimit({
+        action: 'google-doc-export',
+        userId: authUser.uid,
+        ipAddress: await getRequestIpAddress(),
+        windowSeconds: ACTION_RATE_LIMIT_WINDOW_SECONDS,
+        userLimit: usagePolicy.exportRateLimitUserMax,
+        ipLimit: EXPORT_RATE_LIMIT_IP_MAX,
+      });
+    }
+
+    const trimmedSummary = summary.trim();
+    if (!trimmedSummary) {
+      return { success: false, error: 'No summary available for export.' };
+    }
+
+    const date = new Date().toLocaleDateString('he-IL', {
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+    });
+    const docTitle = `Summary - ${tref} - ${date}`;
+    const docData = await createSummariesOnlyDoc([{ tref, summary: trimmedSummary }], docTitle);
+
+    return {
+      success: true,
+      googleDocUrl: docData.url,
+    };
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    console.error('[GoogleDocs] exportSummaryToGoogleDocs failed:', error);
+    return {
+      success: false,
+      error: `Failed to export summary: ${detail}`,
     };
   }
 }
@@ -1529,6 +1650,9 @@ export async function exportAllGuidesToGoogleDocs(
 ): Promise<{ success: boolean; googleDocUrl?: string; error?: string }> {
   try {
     const authUser = await getAuthenticatedUser();
+    if ((authUser.email || '').toLowerCase() !== ADMIN_EMAIL.toLowerCase()) {
+      return { success: false, error: 'Unauthorized: summary-only export is available for this account.' };
+    }
     const userId = authUser.uid;
     const usagePolicy = await getUserUsagePolicy({
       uid: authUser.uid,

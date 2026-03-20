@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { Navigation } from '@/components/Navigation';
@@ -13,7 +13,7 @@ import { cn } from '@/lib/utils';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { TehilimReader } from '@/components/TehilimReader';
-import { generateMultiSourceStudyGuide, exportToGoogleDocs, type GenerationResult, type SourceResult } from '@/app/actions/study-guide';
+import { generateMultiSourceStudyGuide, exportSummaryToGoogleDocs, exportToGoogleDocs, type GenerationResult, type SourceResult } from '@/app/actions/study-guide';
 import { getSimanOptions, getSeifOptions, type SimanOption, type SeifOption } from '@/app/actions/sefaria-metadata';
 import type { SourceKey } from '@/lib/sefaria-api';
 import { hebrewToNumber } from '@/lib/hebrew-utils';
@@ -94,6 +94,8 @@ const CLEAN_SOURCE_DESCRIPTIONS: Record<SourceKey, string> = {
   rav_ovadia: 'פסיקת הרב עובדיה יוסף זצ"ל (יחוה דעת, יביע אומר, חזון עובדיה).',
   torah_ohr: 'מהלך חסידי עם ביאור פנימי.',
 };
+
+const DIRECTOR_EMAIL = 'yossefcohzar@gmail.com';
 
 function isSourceKey(value: unknown): value is SourceKey {
   return typeof value === 'string' && (SOURCE_DISPLAY_ORDER as string[]).includes(value);
@@ -529,30 +531,37 @@ export default function GeneratePage() {
     }
   };
 
-  const handleExport = async () => {
+  const applyExportSuccess = async (googleDocUrl: string, googleDocId?: string) => {
+    if (!guide || !user || !firestore) return;
+    const guideRef = doc(firestore, 'users', user.uid, 'studyGuides', guide.id);
+    const updatedGuide: StudyGuideEntity = {
+      ...guide,
+      status: 'Published',
+      googleDocId: googleDocId ?? guide.googleDocId ?? '',
+      googleDocUrl,
+      updatedAt: new Date().toISOString(),
+    };
+
+    await updateDoc(guideRef, {
+      status: 'Published',
+      googleDocId: updatedGuide.googleDocId,
+      googleDocUrl,
+      updatedAt: updatedGuide.updatedAt,
+    });
+
+    setGuide(updatedGuide);
+    setStatus('success');
+  };
+
+  const handleExportFull = async () => {
     if (!guide || !user || !firestore) return;
     setStatus('exporting');
     setError('');
     await syncFirebaseSession(user);
     const result = await exportToGoogleDocs(guide.tref, previewSummary, previewSourceResults);
     if (result.success && result.googleDocId && result.googleDocUrl) {
-      const guideRef = doc(firestore, 'users', user.uid, 'studyGuides', guide.id);
-      const updatedGuide: StudyGuideEntity = {
-        ...guide,
-        status: 'Published',
-        googleDocId: result.googleDocId,
-        googleDocUrl: result.googleDocUrl,
-        updatedAt: new Date().toISOString(),
-      };
       try {
-        await updateDoc(guideRef, {
-          status: 'Published',
-          googleDocId: result.googleDocId,
-          googleDocUrl: result.googleDocUrl,
-          updatedAt: updatedGuide.updatedAt,
-        });
-        setGuide(updatedGuide);
-        setStatus('success');
+        await applyExportSuccess(result.googleDocUrl, result.googleDocId);
       } catch (e) {
         console.error(e);
         setError('שגיאה בעדכון המסמך. אנא נסה שנית.');
@@ -560,6 +569,26 @@ export default function GeneratePage() {
       }
     } else {
       setError(result.error || 'שגיאה ביצירת מסמך Google Docs.');
+      setStatus('preview');
+    }
+  };
+
+  const handleExportSummary = async () => {
+    if (!guide || !user || !firestore) return;
+    setStatus('exporting');
+    setError('');
+    await syncFirebaseSession(user);
+    const result = await exportSummaryToGoogleDocs(guide.tref, previewSummary);
+    if (result.success && result.googleDocUrl) {
+      try {
+        await applyExportSuccess(result.googleDocUrl);
+      } catch (e) {
+        console.error(e);
+        setError('שגיאה בעדכון המסמך. אנא נסה שנית.');
+        setStatus('preview');
+      }
+    } else {
+      setError(result.error || 'שגיאה ביצוא הסיכום.');
       setStatus('preview');
     }
   };
@@ -576,12 +605,13 @@ export default function GeneratePage() {
     : `${sectionLabel} ${selectedSimanLabel}${needsSeif && selectedSeifLabel ? `:${selectedSeifLabel}` : ''}`.trim();
   const canGenerate = Boolean(user && siman && selectedSources.length > 0 && (!needsSeif || seif));
   const previewChunkCount = previewSourceResults.reduce((sum, sr) => sum + sr.chunks.length, 0);
+  const isDirector = (user?.email || '').toLowerCase() === DIRECTOR_EMAIL;
 
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-white">
       <Navigation />
 
-      {/* ── Toolbar ── */}
+      {/* ?? Toolbar ?? */}
       <div className="flex shrink-0 items-center gap-3 border-b border-gray-200 bg-white px-4 py-2 pt-14 print:hidden" dir="rtl">
         <h1 className="shrink-0 text-sm font-semibold text-gray-800">בניית דף עיון</h1>
         {currentReference && (
@@ -590,14 +620,17 @@ export default function GeneratePage() {
         <div className="flex-1" />
         {(status === 'preview' || status === 'success') && (
           <>
-            <button
-              type="button"
-              onClick={handleExport}
-              className="flex items-center gap-1 text-xs text-gray-500 hover:text-gray-900"
-            >
-              <ArrowRight className="h-3.5 w-3.5 rotate-180" />
-              Google Docs
-            </button>
+            {publishedDocUrl && (
+              <a
+                href={publishedDocUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-1 text-xs text-gray-500 hover:text-gray-900"
+              >
+                <ArrowRight className="h-3.5 w-3.5 rotate-180" />
+                Google Docs
+              </a>
+            )}
             <button
               type="button"
               onClick={() => setStatus('idle')}
@@ -626,7 +659,7 @@ export default function GeneratePage() {
       ) : (
         <div className="flex flex-1 overflow-hidden">
 
-          {/* ── Sidebar – config panel ── */}
+          {/* ?? Sidebar – config panel ?? */}
           <aside className="flex w-72 shrink-0 flex-col overflow-hidden border-l border-gray-200 print:hidden">
             <ScrollArea className="flex-1">
               <div className="space-y-4 p-4" dir="rtl">
@@ -863,7 +896,7 @@ export default function GeneratePage() {
             </div>
           </aside>
 
-          {/* ── Main content ── */}
+          {/* ?? Main content ?? */}
           <main className="flex flex-1 flex-col overflow-hidden">
 
             {/* idle / error */}
@@ -1017,14 +1050,34 @@ export default function GeneratePage() {
                         </p>
                       </div>
                     )}
-                    <button
-                      type="button"
-                      onClick={handleExport}
-                      className="flex w-full items-center justify-center gap-1.5 rounded-md bg-gray-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-gray-700"
-                    >
-                      <ArrowRight className="h-3 w-3 rotate-180" />
-                      ייצוא ל-Google Docs
-                    </button>
+                    <div className="rounded-lg border border-gray-200 bg-gray-50/70 p-3">
+                      <p className="text-[11px] font-semibold uppercase tracking-wider text-gray-400">Export</p>
+                      <p className="mt-1 text-[11px] text-gray-500">
+                        {isDirector
+                          ? 'Full export and summary export are available.'
+                          : 'Only summary export is available for this account.'}
+                      </p>
+                      <div className="mt-3 space-y-2">
+                        <button
+                          type="button"
+                          onClick={handleExportSummary}
+                          className="flex w-full items-center justify-center gap-1.5 rounded-md bg-gray-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-gray-700"
+                        >
+                          <ArrowRight className="h-3 w-3 rotate-180" />
+                          Export Summary
+                        </button>
+                        {isDirector && (
+                          <button
+                            type="button"
+                            onClick={handleExportFull}
+                            className="flex w-full items-center justify-center gap-1.5 rounded-md border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50"
+                          >
+                            <ArrowRight className="h-3 w-3 rotate-180" />
+                            Export Full Guide
+                          </button>
+                        )}
+                      </div>
+                    </div>
                     {publishedDocUrl && (
                       <a
                         href={publishedDocUrl}
@@ -1061,3 +1114,4 @@ export default function GeneratePage() {
     </div>
   );
 }
+

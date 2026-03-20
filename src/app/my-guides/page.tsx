@@ -222,6 +222,7 @@ const SOURCE_THEME: Record<string, {
 };
 
 const SOURCE_ORDER = ['tur', 'beit_yosef', 'shulchan_arukh', 'mishnah_berurah', 'rav_ovadia'];
+const DIRECTOR_EMAIL = 'yossefcohzar@gmail.com';
 
 function parseTref(tref: string): ParsedTref {
   const englishMatch = tref.match(/^(.+?)\s+(\d+)(?::(\d+))?$/);
@@ -743,6 +744,7 @@ export default function MyGuidesPage() {
     () => parseSummarySections(activeGuide?.summaryText ?? ''),
     [activeGuide?.summaryText],
   );
+  const isDirector = (user?.email || '').toLowerCase() === DIRECTOR_EMAIL;
 
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-white">
@@ -930,74 +932,113 @@ export default function MyGuidesPage() {
             {activeGuide ? (
               <>
                 {/* Guide header bar */}
-                <div className="flex shrink-0 items-center justify-between border-b border-gray-200 px-5 py-2 print:hidden" dir="rtl">
-                  <div>
-                    <span className="font-semibold text-gray-900">{activeGuide.tref}</span>
-                    <span className="mr-3 text-xs text-gray-400">
-                      {formatGuideDate(activeGuide.createdAt)} · {activeGuideSources.length} מקורות
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    {activeGuide.googleDocUrl && (
-                      <a
-                        href={activeGuide.googleDocUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="flex items-center gap-1 text-xs text-gray-500 hover:text-gray-900"
-                      >
-                        <ExternalLink className="h-3.5 w-3.5" />
-                        Google Docs
-                      </a>
-                    )}
-                    <button
-                      type="button"
-                      onClick={handlePrintSiman}
-                      disabled={isPrintAllLoading}
-                      className="flex items-center gap-1 text-xs text-gray-500 hover:text-gray-900 disabled:opacity-40"
-                    >
-                      {isPrintAllLoading
-                        ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                        : <Printer className="h-3.5 w-3.5" />}
-                      הדפס סימן
-                    </button>
-                    <button
-                      type="button"
-                      onClick={handleExportSiman}
-                      disabled={isExportAllLoading}
-                      className="flex items-center gap-1 text-xs text-gray-500 hover:text-gray-900 disabled:opacity-40"
-                    >
-                      {isExportAllLoading
-                        ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                        : <ExternalLink className="h-3.5 w-3.5" />}
-                      ייצא סימן ל-Drive
-                    </button>
-                    <button
-                      type="button"
-                      onClick={handleExportSimanSummaries}
-                      disabled={isExportSummariesLoading}
-                      className="flex items-center gap-1 text-xs text-gray-500 hover:text-gray-900 disabled:opacity-40"
-                    >
-                      {isExportSummariesLoading
-                        ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                        : <FileText className="h-3.5 w-3.5" />}
-                      ייצא סיכומים ל-Drive
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => window.print()}
-                      className="flex items-center gap-1 text-xs text-gray-500 hover:text-gray-900"
-                    >
-                      <Printer className="h-3.5 w-3.5" />
-                      הדפס
-                    </button>
+                <div className="flex shrink-0 flex-col gap-3 border-b border-gray-200 px-5 py-3 print:hidden" dir="rtl">
+                  <div className="flex items-start justify-between gap-4">
+                    <div>
+                      <span className="font-semibold text-gray-900">{activeGuide.tref}</span>
+                      <span className="mr-3 text-xs text-gray-400">
+                        {formatGuideDate(activeGuide.createdAt)} · {activeGuideSources.length} מקורות
+                      </span>
+                    </div>
                     <button
                       type="button"
                       onClick={clearActiveGuide}
-                      className="flex items-center gap-1 text-xs text-gray-500 hover:text-gray-900"
+                      className="flex items-center gap-1 rounded-md border border-gray-200 px-2.5 py-1.5 text-xs text-gray-500 hover:border-gray-300 hover:text-gray-900"
                     >
                       <X className="h-3.5 w-3.5" />
                       סגור
                     </button>
+                  </div>
+
+                  <div className="flex flex-wrap items-stretch gap-3">
+                    <section className="min-w-[280px] flex-1 rounded-xl border border-gray-200 bg-gray-50/70 p-3">
+                      <div className="mb-3">
+                        <p className="text-[11px] font-semibold uppercase tracking-wider text-gray-400">Export</p>
+                        <p className="mt-1 text-xs text-gray-500">
+                          {isDirector
+                            ? 'כל אפשרויות הייצוא וההדפסה זמינות לחשבון המנהל.'
+                            : 'למשתמש רגיל זמין רק ייצוא הסיכום.'}
+                        </p>
+                      </div>
+
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          onClick={handleExportSimanSummaries}
+                          disabled={isExportSummariesLoading}
+                          className="flex min-w-[220px] flex-1 items-center justify-between gap-3 rounded-lg border border-emerald-200 bg-white px-3 py-2.5 text-right transition hover:border-emerald-300 hover:bg-emerald-50 disabled:opacity-40"
+                        >
+                          <span className="min-w-0">
+                            <span className="block text-sm font-medium text-gray-900">ייצוא סיכומי הסימן</span>
+                            <span className="block text-xs text-gray-500">Google Docs עם הסיכומים בלבד</span>
+                          </span>
+                          {isExportSummariesLoading
+                            ? <Loader2 className="h-4 w-4 shrink-0 animate-spin text-emerald-700" />
+                            : <FileText className="h-4 w-4 shrink-0 text-emerald-700" />}
+                        </button>
+
+                        {isDirector && (
+                          <button
+                            type="button"
+                            onClick={handleExportSiman}
+                            disabled={isExportAllLoading}
+                            className="flex min-w-[220px] flex-1 items-center justify-between gap-3 rounded-lg border border-gray-200 bg-white px-3 py-2.5 text-right transition hover:border-gray-300 hover:bg-gray-100 disabled:opacity-40"
+                          >
+                            <span className="min-w-0">
+                              <span className="block text-sm font-medium text-gray-900">ייצוא הסימן המלא</span>
+                              <span className="block text-xs text-gray-500">מקורות, ביאורים וסיכום ל-Google Docs</span>
+                            </span>
+                            {isExportAllLoading
+                              ? <Loader2 className="h-4 w-4 shrink-0 animate-spin text-gray-700" />
+                              : <ExternalLink className="h-4 w-4 shrink-0 text-gray-700" />}
+                          </button>
+                        )}
+                      </div>
+                    </section>
+
+                    {isDirector && (
+                      <section className="min-w-[260px] rounded-xl border border-gray-200 bg-white p-3">
+                        <div className="mb-3">
+                          <p className="text-[11px] font-semibold uppercase tracking-wider text-gray-400">Admin Tools</p>
+                          <p className="mt-1 text-xs text-gray-500">כלי עבודה מלאים לחשבון המנהל.</p>
+                        </div>
+
+                        <div className="flex flex-wrap gap-2">
+                          <button
+                            type="button"
+                            onClick={handlePrintSiman}
+                            disabled={isPrintAllLoading}
+                            className="flex items-center gap-1 rounded-md border border-gray-200 px-2.5 py-1.5 text-xs text-gray-600 hover:border-gray-300 hover:text-gray-900 disabled:opacity-40"
+                          >
+                            {isPrintAllLoading
+                              ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                              : <Printer className="h-3.5 w-3.5" />}
+                            הדפסת סימן מלא
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => window.print()}
+                            className="flex items-center gap-1 rounded-md border border-gray-200 px-2.5 py-1.5 text-xs text-gray-600 hover:border-gray-300 hover:text-gray-900"
+                          >
+                            <Printer className="h-3.5 w-3.5" />
+                            הדפסת עמוד
+                          </button>
+
+                          {activeGuide.googleDocUrl && (
+                            <a
+                              href={activeGuide.googleDocUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="flex items-center gap-1 rounded-md border border-gray-200 px-2.5 py-1.5 text-xs text-gray-600 hover:border-gray-300 hover:text-gray-900"
+                            >
+                              <ExternalLink className="h-3.5 w-3.5" />
+                              Google Docs
+                            </a>
+                          )}
+                        </div>
+                      </section>
+                    )}
                   </div>
                 </div>
 
