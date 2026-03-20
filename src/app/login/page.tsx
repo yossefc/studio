@@ -7,9 +7,8 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { useAuth, useUser } from '@/firebase';
 import { GoogleAuthProvider, signInWithPopup } from 'firebase/auth';
-import { initiateAnonymousSignIn } from '@/firebase/non-blocking-login';
 import { useRouter } from 'next/navigation';
-import { AlertCircle, Ghost, Loader2 } from 'lucide-react';
+import { AlertCircle, Loader2 } from 'lucide-react';
 import { useEffect } from 'react';
 
 const googleProvider = new GoogleAuthProvider();
@@ -70,12 +69,6 @@ export default function LoginPage() {
     }
   };
 
-  const handleAnonymous = () => {
-    if (!auth) return;
-    setIsSubmitting(true);
-    setError(null);
-    initiateAnonymousSignIn(auth);
-  };
 
   if (isUserLoading) {
     return (
@@ -139,26 +132,6 @@ export default function LoginPage() {
                 </svg>
               )}
               התחבר עם Google
-            </Button>
-
-            {/* Separator */}
-            <div className="relative my-4">
-              <div className="absolute inset-0 flex items-center">
-                <span className="w-full border-t" />
-              </div>
-              <div className="relative flex justify-center text-xs uppercase">
-                <span className="bg-background px-2 text-muted-foreground">או</span>
-              </div>
-            </div>
-
-            {/* Anonymous */}
-            <Button
-              variant="ghost"
-              onClick={handleAnonymous}
-              className="w-full h-12 rounded-xl gap-2 text-muted-foreground hover:text-foreground"
-              disabled={isSubmitting}
-            >
-              <Ghost className="w-5 h-5" /> כניסה אנונימית
             </Button>
           </CardContent>
         </Card>
