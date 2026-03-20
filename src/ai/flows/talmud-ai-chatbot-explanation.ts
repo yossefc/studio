@@ -13,7 +13,7 @@ import { ai, generateTextWithFallback, getModelCandidates, getModelConfig } from
 import { HEBREW_RATIO_THRESHOLD } from '@/lib/constants';
 import { getAdminDb } from '@/server/firebase-admin';
 
-const PROMPT_VERSION = 'v4.3-metivta-per-source';
+const PROMPT_VERSION = 'v4.4-sa-without-mb';
 
 const SOURCE_LABELS: Record<string, string> = {
   tur: 'טור',
@@ -298,17 +298,7 @@ export const talmudAIChatbotExplanationFlow = ai.defineFlow(
 
     const sourceLabel = SOURCE_LABELS[input.sourceKey] || 'שולחן ערוך';
 
-    const companionSection = ''; /*
-      ? `תוספת מן המשנה ברורה:
-${input.companionText}
-
-לאחר ביאור ${sourceLabel}, הוסף כותרת נפרדת בדיוק כך: "משנה ברורה".
-תחת כותרת זו סדר בקצרה:
-- חידושים עיקריים,
-- הסתייגויות והגבלות,
-- נקודות מעשיות ונפקא מינות,
-- ואם ידוע מן הטקסט, גם ציון ס"ק.`
-      : ''; */
+    const companionSection = '';
 
     const beitYosefAddition = input.sourceKey === 'beit_yosef'
       ? `הוראה נוספת לבית יוסף:

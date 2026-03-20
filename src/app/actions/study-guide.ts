@@ -1232,9 +1232,7 @@ export async function generateMultiSourceStudyGuide(
       }
 
       if (result.chunks.length > 0) {
-        const label = config.hebrewLabel; /*
-          ? `${config.hebrewLabel} (עם משנה ברורה)`
-          : config.hebrewLabel; */
+        const label = config.hebrewLabel;
 
         sourceResults.push({
           sourceKey,
