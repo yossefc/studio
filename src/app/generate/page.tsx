@@ -216,12 +216,16 @@ export default function GeneratePage() {
   const firestore = useFirestore();
   const router = useRouter();
 
-  const renderAccentText = (text: string | undefined | null, accentClass: string) =>
-    (text ?? "").split("**").map((part, i) =>
+  const renderAccentText = (text: string | undefined | null, accentClass: string) => {
+    const normalized = (text ?? '')
+      .replace(/\n{3,}/g, '\n\n')
+      .replace(/([^\n])\n([^\n])/g, '$1 $2');
+    return normalized.split('**').map((part, i) =>
       i % 2 === 1
         ? <strong key={i} className={cn('font-bold', accentClass)}>{part}</strong>
         : part,
     );
+  };
 
   const hydratePreviewFromSavedGuide = useCallback(async (guideId: string, rawGuide: Record<string, unknown>) => {
     if (!user || !firestore || hydratingPreviewRef.current) return;
