@@ -841,7 +841,18 @@ export default function MyGuidesPage() {
       ) : (
 
         /* ג”€ג”€ Main layout ג”€ג”€ */
-        <div id="main-layout" className="flex flex-1 overflow-hidden">
+        <div id="main-layout" className="relative flex flex-1 overflow-hidden">
+
+          {!isSimanimPanelOpen && (
+            <button
+              type="button"
+              onClick={() => setIsSimanimPanelOpen(true)}
+              className="absolute right-3 top-3 z-20 flex items-center gap-1 rounded-full border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 shadow-sm hover:border-gray-300 hover:bg-gray-50 print:hidden"
+            >
+              <ChevronDown className="h-3.5 w-3.5 -rotate-90" />
+              סימנים
+            </button>
+          )}
 
           {/* ג”€ג”€ Sidebar tree ג”€ג”€ */}
           {isSimanimPanelOpen && (
@@ -986,14 +997,14 @@ export default function MyGuidesPage() {
                           className="flex items-center gap-1 rounded-md border border-gray-200 px-2.5 py-1.5 text-xs text-gray-600 hover:border-gray-300 hover:text-gray-900"
                         >
                           <ChevronDown className={cn('h-3.5 w-3.5 transition-transform', isExportMenuOpen && 'rotate-180')} />
-                          ??????
+                          פעולות
                         </button>
                         {isExportMenuOpen && (
                           <div className="absolute left-0 top-full z-20 mt-2 w-64 rounded-xl border border-gray-200 bg-white p-2 shadow-lg">
                             <p className="px-2 pb-2 text-[11px] text-gray-400">
                               {isDirector
-                                ? '?? ???????? ?????? ??????? ?????? ?????? ?????.'
-                                : '?????? ???? ???? ?? ????? ??????.'}
+                                ? 'כאן תוכלו לייצא ולהדפיס את כל תוכן הסימן.'
+                                : 'ייצוא סיכומי הסימן בלבד לגוגל דוקס.'}
                             </p>
                             <div className="space-y-1">
                               <button
@@ -1005,7 +1016,7 @@ export default function MyGuidesPage() {
                                 disabled={isExportSummariesLoading}
                                 className="flex w-full items-center justify-between rounded-lg px-2.5 py-2 text-right text-sm text-gray-700 hover:bg-emerald-50 disabled:opacity-40"
                               >
-                                <span>????? ?????? ?????</span>
+                                <span>ייצוא סיכומי הסימן</span>
                                 {isExportSummariesLoading
                                   ? <Loader2 className="h-4 w-4 animate-spin text-emerald-700" />
                                   : <FileText className="h-4 w-4 text-emerald-700" />}
@@ -1021,7 +1032,7 @@ export default function MyGuidesPage() {
                                   disabled={isExportAllLoading}
                                   className="flex w-full items-center justify-between rounded-lg px-2.5 py-2 text-right text-sm text-gray-700 hover:bg-gray-100 disabled:opacity-40"
                                 >
-                                  <span>????? ????? ????</span>
+                                  <span>ייצוא הסימן המלא</span>
                                   {isExportAllLoading
                                     ? <Loader2 className="h-4 w-4 animate-spin text-gray-700" />
                                     : <ExternalLink className="h-4 w-4 text-gray-700" />}
@@ -1038,7 +1049,7 @@ export default function MyGuidesPage() {
                                   disabled={isPrintAllLoading}
                                   className="flex w-full items-center justify-between rounded-lg px-2.5 py-2 text-right text-sm text-gray-700 hover:bg-gray-100 disabled:opacity-40"
                                 >
-                                  <span>????? ???? ???</span>
+                                  <span>הדפסת הסימן</span>
                                   {isPrintAllLoading
                                     ? <Loader2 className="h-4 w-4 animate-spin text-gray-700" />
                                     : <Printer className="h-4 w-4 text-gray-700" />}
@@ -1054,7 +1065,7 @@ export default function MyGuidesPage() {
                                   }}
                                   className="flex w-full items-center justify-between rounded-lg px-2.5 py-2 text-right text-sm text-gray-700 hover:bg-gray-100"
                                 >
-                                  <span>????? ????</span>
+                                  <span>הדפסת הדף</span>
                                   <Printer className="h-4 w-4 text-gray-700" />
                                 </button>
                               )}
@@ -1067,7 +1078,7 @@ export default function MyGuidesPage() {
                                   onClick={() => setIsExportMenuOpen(false)}
                                   className="flex w-full items-center justify-between rounded-lg px-2.5 py-2 text-right text-sm text-gray-700 hover:bg-gray-100"
                                 >
-                                  <span>??? ?-Google Docs</span>
+                                  <span>פתח ב-Google Docs</span>
                                   <ExternalLink className="h-4 w-4 text-gray-700" />
                                 </a>
                               )}
@@ -1082,7 +1093,7 @@ export default function MyGuidesPage() {
                         className="flex items-center gap-1 rounded-md border border-gray-200 px-2.5 py-1.5 text-xs text-gray-500 hover:border-gray-300 hover:text-gray-900"
                       >
                         <X className="h-3.5 w-3.5" />
-                        ????????
+                        סגירה
                       </button>
                     </div>
                   </div>
@@ -1266,9 +1277,9 @@ export default function MyGuidesPage() {
                         <div className="flex shrink-0 items-center gap-0.5 border-b border-gray-100 bg-gray-50 px-2 py-1" dir="ltr">
                           <button type="button" onClick={() => insertFormat('\n## ', '')} className="rounded px-1.5 py-0.5 text-[11px] font-bold text-gray-500 hover:bg-gray-200 hover:text-gray-800" title="כותרת">##</button>
                           <button type="button" onClick={() => insertFormat('**', '**')} className="rounded px-1.5 py-0.5 text-[11px] font-bold text-gray-500 hover:bg-gray-200 hover:text-gray-800" title="מודגש">B</button>
-                          <button type="button" onClick={() => insertFormat('\n- ', '')} className="rounded px-1.5 py-0.5 text-[11px] text-gray-500 hover:bg-gray-200 hover:text-gray-800" title="נקודה">ג€¢ג€”</button>
+                          <button type="button" onClick={() => insertFormat('\n- ', '')} className="rounded px-1.5 py-0.5 text-[11px] text-gray-500 hover:bg-gray-200 hover:text-gray-800" title="נקודה">•—</button>
                           <div className="mx-1 h-3 w-px bg-gray-300" />
-                          <button type="button" onClick={() => insertFormat('\n---\n', '')} className="rounded px-1.5 py-0.5 text-[11px] text-gray-500 hover:bg-gray-200 hover:text-gray-800" title="קו הפרדה">ג€”</button>
+                          <button type="button" onClick={() => insertFormat('\n---\n', '')} className="rounded px-1.5 py-0.5 text-[11px] text-gray-500 hover:bg-gray-200 hover:text-gray-800" title="קו הפרדה">—</button>
                         </div>
                       )}
 
@@ -1301,7 +1312,7 @@ export default function MyGuidesPage() {
                                     <ul className="space-y-1 text-gray-700">
                                       {section.items.map((item, ii) => (
                                         <li key={ii} className="flex gap-2">
-                                          <span className="shrink-0 text-gray-400">ג€¢</span>
+                                          <span className="shrink-0 text-gray-400">•</span>
                                           <span>{renderAccentText(item, 'text-gray-900')}</span>
                                         </li>
                                       ))}
@@ -1415,7 +1426,7 @@ export default function MyGuidesPage() {
                           <ul className="mt-1 space-y-0.5 text-sm text-gray-700">
                             {sec.items.map((item, ii) => (
                               <li key={ii} className="flex gap-2">
-                                <span className="shrink-0 text-gray-400">ג€¢</span>
+                                <span className="shrink-0 text-gray-400">•</span>
                                 <span>{item}</span>
                               </li>
                             ))}
