@@ -74,7 +74,7 @@ function validateSummary(text: string, isTorahOhr: boolean = false): { valid: bo
 }
 
 
-function getStyleRules(isTorahOhr: boolean, hasMb: boolean = false): string {
+function getStyleRules(isTorahOhr: boolean, hasMb: boolean = false, hasSa: boolean = false): string {
   if (isTorahOhr) {
     return `אתה כותב סיכום קצר של מושגים רוחניים מתוך תורה אור.
 ענה בעברית בלבד.
@@ -97,6 +97,11 @@ function getStyleRules(isTorahOhr: boolean, hasMb: boolean = false): string {
 `
     : '';
 
+
+  const saLine = hasSa
+    ? `- שולחן ערוך: ציין את לשון המחבר ועיקר פסיקתו בנושא זה.
+`
+    : '';
   return `אתה כותב סיכום לבחינת רבנות, מסודר לפי נושאים.
 ענה בעברית בלבד.
 
@@ -104,7 +109,7 @@ function getStyleRules(isTorahOhr: boolean, hasMb: boolean = false): string {
 ## <שם הנושא>
 - נושא: משפט אחד קצר המגדיר את הנושא.
 - דעות: עיקרי הדעות (ראשונים ואחרונים), מקובצות לפי שיטה. אם אין מחלוקת, כתוב זאת.
-${mbOpinionsLine}- הלכה: פסיקת השולחן ערוך בשורה אחת ברורה ומעשית.
+${mbOpinionsLine}${saLine}- הלכה: פסיקת השולחן ערוך בשורה אחת ברורה ומעשית.
 - רב עובדיה יוסף: פסיקתו של הרב עובדיה יוסף זצ"ל בנושא זה. אם לא ידועה הכרעה ספציפית, כתוב "אין הכרעה ידועה בנושא זה".
 
 כללים:
@@ -122,7 +127,8 @@ function getStructuredStyleRules(sources: string[], isTorahOhr: boolean): string
 
   const hasMb = sources.includes('mishnah_berurah');
   // For all halachic sources: topic-based summary with Rav Ovadia's opinion
-  return getStyleRules(false, hasMb);
+  const hasSa = sources.includes('shulchan_arukh');
+  return getStyleRules(false, hasMb, hasSa);
 }
 
 function buildSummaryPrompt(studyGuideText: string, sources: string[]) {
