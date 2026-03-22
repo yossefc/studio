@@ -19,7 +19,7 @@ import {
 } from 'lucide-react';
 import { collection, deleteDoc, doc, getDocs, orderBy, query, updateDoc } from 'firebase/firestore';
 import { type MouseEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { exportAllGuidesToGoogleDocs, exportSimanSummariesToGoogleDocs } from '@/app/actions/study-guide';
+import { exportAllGuidesToGoogleDocs, exportSeifToGoogleDocs, exportSimanSummariesToGoogleDocs } from '@/app/actions/study-guide';
 
 import { Navigation } from '@/components/Navigation';
 import { Button } from '@/components/ui/button';
@@ -384,6 +384,7 @@ export default function MyGuidesPage() {
   const [isPrintAllLoading, setIsPrintAllLoading] = useState(false);
   const [isExportAllLoading, setIsExportAllLoading] = useState(false);
   const [isExportSummariesLoading, setIsExportSummariesLoading] = useState(false);
+  const [isExportSeifLoading, setIsExportSeifLoading] = useState(false);
   const [isExportMenuOpen, setIsExportMenuOpen] = useState(false);
   const [isSimanimPanelOpen, setIsSimanimPanelOpen] = useState(true);
   const [exportError, setExportError] = useState<string | null>(null);
@@ -731,6 +732,25 @@ export default function MyGuidesPage() {
     }
   }, [user, isExportSummariesLoading, simanGuides, activeGuide]);
 
+  const handleExportSeif = useCallback(async () => {
+    if (!user || !activeGuide || isExportSeifLoading) return;
+    setIsExportSeifLoading(true);
+    setExportError(null);
+    try {
+      await syncFirebaseSession(user);
+      const result = await exportSeifToGoogleDocs(activeGuide.id);
+      if (result.success && result.googleDocUrl) {
+        window.open(result.googleDocUrl, '_blank');
+      } else {
+        setExportError(result.error ?? 'שגיאה לא ידועה');
+      }
+    } catch (error) {
+      setExportError(error instanceof Error ? error.message : 'שגיאה לא ידועה');
+    } finally {
+      setIsExportSeifLoading(false);
+    }
+  }, [user, activeGuide, isExportSeifLoading]);
+
   const chunksBySource = useMemo(() => {
     const map = new Map<string, TextChunkEntity[]>();
     for (const chunk of chunks) {
@@ -1004,9 +1024,24 @@ export default function MyGuidesPage() {
                             <p className="px-2 pb-2 text-[11px] text-gray-400">
                               {isDirector
                                 ? 'כאן תוכלו לייצא ולהדפיס את כל תוכן הסימן.'
-                                : 'ייצוא סיכומי הסימן בלבד לגוגל דוקס.'}
+                                : 'ייצוא הסעיף המלא או סיכומי הסימן לגוגל דוקס.'}
                             </p>
                             <div className="space-y-1">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setIsExportMenuOpen(false);
+                                  void handleExportSeif();
+                                }}
+                                disabled={isExportSeifLoading}
+                                className="flex w-full items-center justify-between rounded-lg px-2.5 py-2 text-right text-sm text-gray-700 hover:bg-blue-50 disabled:opacity-40"
+                              >
+                                <span>ייצוא הסעיף המלא</span>
+                                {isExportSeifLoading
+                                  ? <Loader2 className="h-4 w-4 animate-spin text-blue-700" />
+                                  : <FileText className="h-4 w-4 text-blue-700" />}
+                              </button>
+
                               <button
                                 type="button"
                                 onClick={() => {

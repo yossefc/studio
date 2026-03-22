@@ -1585,6 +1585,75 @@ export async function exportSummaryToGoogleDocs(
   }
 }
 
+export async function exportSeifToGoogleDocs(
+  guideId: string,
+): Promise<{ success: boolean; googleDocUrl?: string; error?: string }> {
+  try {
+    const authUser = await getAuthenticatedUser();
+    const userId = authUser.uid;
+    const usagePolicy = await getUserUsagePolicy({ uid: userId, email: authUser.email });
+    if (!usagePolicy.unlimited) {
+      await assertActionRateLimit({
+        action: 'google-doc-export',
+        userId,
+        ipAddress: await getRequestIpAddress(),
+        windowSeconds: ACTION_RATE_LIMIT_WINDOW_SECONDS,
+        userLimit: usagePolicy.exportRateLimitUserMax,
+        ipLimit: EXPORT_RATE_LIMIT_IP_MAX,
+      });
+    }
+    const db = getAdminDb();
+    const guidesRef = db.collection('users').doc(userId).collection('studyGuides');
+    const guideSnap = await guidesRef.doc(guideId).get();
+    if (!guideSnap.exists) return { success: false, error: 'הביאור לא נמצא.' };
+    const guideData = guideSnap.data() as { tref: string; summaryText: string; sources?: SourceKey[] };
+
+    const chunksSnap = await guidesRef
+      .doc(guideId)
+      .collection('textChunks')
+      .orderBy('orderIndex', 'asc')
+      .get();
+
+    const chunksBySource = new Map<string, ProcessedChunk[]>();
+    for (const chunkDoc of chunksSnap.docs) {
+      const c = chunkDoc.data() as {
+        sourceKey: string;
+        orderIndex: number;
+        rawText: string;
+        explanationText: string;
+      };
+      if (!chunksBySource.has(c.sourceKey)) chunksBySource.set(c.sourceKey, []);
+      chunksBySource.get(c.sourceKey)!.push({
+        id: chunkDoc.id,
+        rawText: c.rawText ?? '',
+        explanation: c.explanationText ?? '',
+        rawHash: '',
+        cacheHit: false,
+        orderIndex: c.orderIndex,
+      });
+    }
+
+    const sourceResults: SourceResult[] = SOURCE_PROCESSING_ORDER
+      .filter((key) => chunksBySource.has(key))
+      .map((key) => {
+        const config = SOURCE_CONFIGS[key];
+        return {
+          sourceKey: key,
+          hebrewLabel: config?.hebrewLabel ?? key,
+          tref: guideData.tref,
+          chunks: chunksBySource.get(key)!,
+        };
+      });
+
+    const docData = await createStudyGuideDoc(guideData.tref, guideData.summaryText ?? '', sourceResults);
+    return { success: true, googleDocUrl: docData.url };
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    console.error('[GoogleDocs] exportSeifToGoogleDocs failed:', error);
+    return { success: false, error: `יצירת מסמך Google Docs נכשלה: ${detail}` };
+  }
+}
+
 export async function exportSimanSummariesToGoogleDocs(
   guideIds: string[],
   simanLabel: string,
