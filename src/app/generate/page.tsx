@@ -8,7 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Textarea } from '@/components/ui/textarea';
 import { Input } from '@/components/ui/input';
 import { Progress } from '@/components/ui/progress';
-import { Loader2, AlertCircle, ArrowRight, XCircle, ScrollText } from 'lucide-react';
+import { Loader2, AlertCircle, ArrowRight, ChevronDown, XCircle, ScrollText } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
@@ -147,6 +147,7 @@ export default function GeneratePage() {
   const [seifOptions, setSeifOptions] = useState<SeifOption[]>([]);
   const [loadingSimanim, setLoadingSimanim] = useState(true);
   const [loadingSeifim, setLoadingSeifim] = useState(false);
+  const [isConfigPanelOpen, setIsConfigPanelOpen] = useState(true);
 
   const [status, setStatus] = useState<'idle' | 'processing' | 'preview' | 'exporting' | 'success' | 'error'>('idle');
   const [error, setError] = useState('');
@@ -162,12 +163,27 @@ export default function GeneratePage() {
 
   const [previewSourceResults, setPreviewSourceResults] = useState<SourceResult[]>([]);
   const [previewSummary, setPreviewSummary] = useState('');
+  const [isExportMenuOpen, setIsExportMenuOpen] = useState(false);
   const publishedDocUrl = guide?.googleDocUrl?.trim() ?? '';
+  const exportMenuRef = useRef<HTMLDivElement | null>(null);
 
   const isServerActionNetworkError = (err: unknown): boolean => {
     const message = err instanceof Error ? err.message : String(err ?? '');
     return /failed to fetch|fetch failed|networkerror/i.test(message);
   };
+
+  useEffect(() => {
+    const handlePointerDown = (event: globalThis.MouseEvent) => {
+      const target = event.target;
+      if (!(target instanceof Node)) return;
+      if (exportMenuRef.current && !exportMenuRef.current.contains(target)) {
+        setIsExportMenuOpen(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handlePointerDown);
+    return () => document.removeEventListener('mousedown', handlePointerDown);
+  }, []);
 
   const callGenerateWithRetry = async (
     request: Parameters<typeof generateMultiSourceStudyGuide>[0],
@@ -617,6 +633,14 @@ export default function GeneratePage() {
         {currentReference && (
           <span className="text-xs text-gray-500">{currentReference}</span>
         )}
+        <button
+          type="button"
+          onClick={() => setIsConfigPanelOpen((prev) => !prev)}
+          className="flex items-center gap-1 rounded-md border border-gray-200 px-2.5 py-1.5 text-xs text-gray-600 hover:border-gray-300 hover:text-gray-900"
+        >
+          <ChevronDown className={cn('h-3.5 w-3.5 transition-transform', !isConfigPanelOpen && '-rotate-90')} />
+          הגדרות
+        </button>
         <div className="flex-1" />
         {(status === 'preview' || status === 'success') && (
           <>
@@ -657,10 +681,22 @@ export default function GeneratePage() {
           <Loader2 className="h-5 w-5 animate-spin text-gray-300" />
         </div>
       ) : (
-        <div className="flex flex-1 overflow-hidden">
+        <div className="relative flex flex-1 overflow-hidden">
+
+          {!isConfigPanelOpen && (
+            <button
+              type="button"
+              onClick={() => setIsConfigPanelOpen(true)}
+              className="absolute left-3 top-3 z-20 flex items-center gap-1 rounded-full border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 shadow-sm hover:border-gray-300 hover:bg-gray-50"
+            >
+              <ChevronDown className="h-3.5 w-3.5 rotate-90" />
+              הגדרות
+            </button>
+          )}
 
           {/* ?? Sidebar – config panel ?? */}
-          <aside className="flex w-72 shrink-0 flex-col overflow-hidden border-l border-gray-200 print:hidden">
+          {isConfigPanelOpen && (
+            <aside className="flex w-72 shrink-0 flex-col overflow-hidden border-l border-gray-200 print:hidden">
             <ScrollArea className="flex-1">
               <div className="space-y-4 p-4" dir="rtl">
 
@@ -894,7 +930,8 @@ export default function GeneratePage() {
                   : !user ? 'נדרשת התחברות' : 'בנה דף עיון'}
               </button>
             </div>
-          </aside>
+            </aside>
+          )}
 
           {/* ?? Main content ?? */}
           <main className="flex flex-1 flex-col overflow-hidden">
@@ -1050,51 +1087,74 @@ export default function GeneratePage() {
                         </p>
                       </div>
                     )}
-                    <div className="rounded-lg border border-gray-200 bg-gray-50/70 p-3">
-                      <p className="text-[11px] font-semibold uppercase tracking-wider text-gray-400">Export</p>
-                      <p className="mt-1 text-[11px] text-gray-500">
-                        {isDirector
-                          ? 'Full export and summary export are available.'
-                          : 'Only summary export is available for this account.'}
-                      </p>
-                      <div className="mt-3 space-y-2">
-                        <button
-                          type="button"
-                          onClick={handleExportSummary}
-                          className="flex w-full items-center justify-center gap-1.5 rounded-md bg-gray-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-gray-700"
-                        >
-                          <ArrowRight className="h-3 w-3 rotate-180" />
-                          Export Summary
-                        </button>
-                        {isDirector && (
-                          <button
-                            type="button"
-                            onClick={handleExportFull}
-                            className="flex w-full items-center justify-center gap-1.5 rounded-md border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50"
-                          >
-                            <ArrowRight className="h-3 w-3 rotate-180" />
-                            Export Full Guide
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                    {publishedDocUrl && (
-                      <a
-                        href={publishedDocUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="flex w-full items-center justify-center gap-1.5 rounded-md border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50"
+                    <div ref={exportMenuRef} className="relative">
+                      <button
+                        type="button"
+                        onClick={() => setIsExportMenuOpen((prev) => !prev)}
+                        className="flex w-full items-center justify-between rounded-md border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50"
                       >
-                        פתח ב-Google Docs
-                      </a>
-                    )}
-                    <button
-                      type="button"
-                      onClick={() => window.print()}
-                      className="flex w-full items-center justify-center gap-1.5 rounded-md border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50"
-                    >
-                      הדפס
-                    </button>
+                        <span>{isDirector ? 'פעולות וייצוא' : 'ייצוא סיכום'}</span>
+                        <ChevronDown className={cn('h-3.5 w-3.5 transition-transform', isExportMenuOpen && 'rotate-180')} />
+                      </button>
+                      {isExportMenuOpen && (
+                        <div className="absolute inset-x-0 top-full z-20 mt-2 rounded-xl border border-gray-200 bg-white p-2 shadow-lg">
+                          <p className="px-2 pb-2 text-[11px] text-gray-400">
+                            {isDirector
+                              ? 'ייצוא מלא, ייצוא סיכום ופעולות נוספות זמינים לחשבון המנהל.'
+                              : 'לחשבון זה זמין רק ייצוא הסיכום.'}
+                          </p>
+                          <div className="space-y-1">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setIsExportMenuOpen(false);
+                                void handleExportSummary();
+                              }}
+                              className="flex w-full items-center justify-between rounded-lg px-2.5 py-2 text-right text-sm text-gray-700 hover:bg-gray-100"
+                            >
+                              <span>Export Summary</span>
+                              <ArrowRight className="h-3 w-3 rotate-180" />
+                            </button>
+                            {isDirector && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setIsExportMenuOpen(false);
+                                  void handleExportFull();
+                                }}
+                                className="flex w-full items-center justify-between rounded-lg px-2.5 py-2 text-right text-sm text-gray-700 hover:bg-gray-100"
+                              >
+                                <span>Export Full Guide</span>
+                                <ArrowRight className="h-3 w-3 rotate-180" />
+                              </button>
+                            )}
+                            {publishedDocUrl && (
+                              <a
+                                href={publishedDocUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                onClick={() => setIsExportMenuOpen(false)}
+                                className="flex w-full items-center justify-between rounded-lg px-2.5 py-2 text-right text-sm text-gray-700 hover:bg-gray-100"
+                              >
+                                <span>פתח ב-Google Docs</span>
+                                <ArrowRight className="h-3 w-3 rotate-180" />
+                              </a>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setIsExportMenuOpen(false);
+                                window.print();
+                              }}
+                              className="flex w-full items-center justify-between rounded-lg px-2.5 py-2 text-right text-sm text-gray-700 hover:bg-gray-100"
+                            >
+                              <span>הדפס</span>
+                              <ArrowRight className="h-3 w-3 rotate-180" />
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
                     <button
                       type="button"
                       onClick={() => setStatus('idle')}
