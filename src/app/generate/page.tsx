@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { Navigation } from '@/components/Navigation';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -13,7 +13,7 @@ import { cn } from '@/lib/utils';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { TehilimReader } from '@/components/TehilimReader';
-import { generateMultiSourceStudyGuide, exportSummaryToGoogleDocs, exportToGoogleDocs, type GenerationResult, type SourceResult } from '@/app/actions/study-guide';
+import { generateMultiSourceStudyGuide, exportSummaryToGoogleDocs, exportToGoogleDocs, loadFreeTierGuide, getMonthlyUsageCount, type GenerationResult, type SourceResult } from '@/app/actions/study-guide';
 import { getSimanOptions, getSeifOptions, type SimanOption, type SeifOption } from '@/app/actions/sefaria-metadata';
 import type { SourceKey } from '@/lib/sefaria-api';
 import { hebrewToNumber } from '@/lib/hebrew-utils';
@@ -21,6 +21,9 @@ import { useRouter } from 'next/navigation';
 import { useFirestore, useUser } from '@/firebase';
 import { doc, setDoc, updateDoc, onSnapshot, collection, query, orderBy, getDocs } from 'firebase/firestore';
 import { syncFirebaseSession } from '@/firebase/session-sync';
+import { createCheckoutSession } from '@/app/actions/payment';
+import { isFreeTierContent } from '@/lib/free-tier';
+import { PaywallModal } from '@/components/PaywallModal';
 
 interface StudyGuideEntity {
   id: string;
@@ -164,6 +167,10 @@ export default function GeneratePage() {
   const [previewSourceResults, setPreviewSourceResults] = useState<SourceResult[]>([]);
   const [previewSummary, setPreviewSummary] = useState('');
   const [isExportMenuOpen, setIsExportMenuOpen] = useState(false);
+  const [showPaywall, setShowPaywall] = useState(false);
+  const [isSubscribing, setIsSubscribing] = useState(false);
+  const [usageCount, setUsageCount] = useState(0);
+  const [usageLimit, setUsageLimit] = useState(30);
   const publishedDocUrl = guide?.googleDocUrl?.trim() ?? '';
   const exportMenuRef = useRef<HTMLDivElement | null>(null);
 
@@ -215,6 +222,11 @@ export default function GeneratePage() {
   const { user, isUserLoading } = useUser();
   const firestore = useFirestore();
   const router = useRouter();
+
+  const isFreeTier = useMemo(
+    () => isFreeTierContent(section, siman, seif),
+    [section, siman, seif],
+  );
 
   const renderAccentText = (text: string | undefined | null, accentClass: string) => {
     const normalized = (text ?? '')
@@ -299,12 +311,40 @@ export default function GeneratePage() {
     }
   }, [user, firestore]);
 
-  // Redirect to login if not authenticated
+  // Redirect to login if not authenticated (free tier content is accessible without login)
   useEffect(() => {
-    if (!isUserLoading && !user) {
+    if (!isUserLoading && !user && !isFreeTier) {
       router.push('/login');
     }
-  }, [user, isUserLoading, router]);
+  }, [user, isUserLoading, router, isFreeTier]);
+
+  // Auto-load free tier guide on selection change
+  useEffect(() => {
+    if (!isFreeTier) return;
+    setStatus('processing');
+    setError('');
+    const sources = selectedSources.length > 0 ? selectedSources : (['shulchan_arukh'] as const);
+    loadFreeTierGuide({ section, siman, seif, sources: [...sources] })
+      .then((result) => {
+        if (result.success && result.guideData) {
+          setPreviewSourceResults(result.guideData.sourceResults);
+          setPreviewSummary(result.guideData.summary);
+          setStatus('preview');
+        } else {
+          setStatus('idle');
+        }
+      })
+      .catch(() => setStatus('idle'));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isFreeTier, section, siman, seif]);
+
+  // Load monthly usage count for logged-in users
+  useEffect(() => {
+    if (!user) return;
+    getMonthlyUsageCount()
+      .then(({ count, limit }) => { setUsageCount(count); setUsageLimit(limit); })
+      .catch(() => {});
+  }, [user]);
 
   // Listen for real-time progress updates
   useEffect(() => {
@@ -535,6 +575,10 @@ export default function GeneratePage() {
           setError('שגיאה בשמירת הביאור. אנא נסה שנית.');
           setStatus('error');
         }
+      } else if (result.error === 'SUBSCRIPTION_REQUIRED') {
+        setShowPaywall(true);
+        setStatus('idle');
+        await updateDoc(guideRef, { status: 'Cancelled', updatedAt: new Date().toISOString() });
       } else {
         setError(result.error || 'לא הצלחנו למצוא את המקור או להפיק ביאור.');
         setStatus('error');
@@ -611,9 +655,22 @@ export default function GeneratePage() {
       setError(result.error || 'שגיאה ביצוא הסיכום.');
       setStatus('preview');
     }
-  };
+  }
 
-  const isInteractionDisabled = isUserLoading || status === 'processing' || !user;
+  const handleSubscribe = async () => {
+    if (!user) { router.push('/login'); return; }
+    setIsSubscribing(true);
+    try {
+      const result = await createCheckoutSession();
+      if ('url' in result && result.url) {
+        window.location.href = result.url;
+      }
+    } finally {
+      setIsSubscribing(false);
+    }
+  };;
+
+  const isInteractionDisabled = isUserLoading || status === 'processing' || (!user && !isFreeTier);
   const availableSources = SOURCE_OPTIONS
     .filter(opt => !opt.onlyOC || section === 'Orach Chayim')
     .filter(opt => section === 'Torah Ohr' ? opt.key === 'torah_ohr' : opt.key !== 'torah_ohr');
@@ -623,7 +680,7 @@ export default function GeneratePage() {
   const currentReference = isTorahOhrFullParasha
     ? `${sectionLabel} ${selectedSimanLabel}`.trim()
     : `${sectionLabel} ${selectedSimanLabel}${needsSeif && selectedSeifLabel ? `:${selectedSeifLabel}` : ''}`.trim();
-  const canGenerate = Boolean(user && siman && selectedSources.length > 0 && (!needsSeif || seif));
+  const canGenerate = Boolean((user || isFreeTier) && siman && selectedSources.length > 0 && (!needsSeif || seif));
   const previewChunkCount = previewSourceResults.reduce((sum, sr) => sum + sr.chunks.length, 0);
   const isDirector = (user?.email || '').toLowerCase() === DIRECTOR_EMAIL;
 
@@ -921,6 +978,16 @@ export default function GeneratePage() {
               </div>
             </ScrollArea>
 
+            {/* Usage counter */}
+            {user && !isDirector && (
+              <div className="px-3 pb-2" dir="rtl">
+                <div className="flex items-center justify-between text-xs text-gray-500 mb-1">
+                  <span>הפקות החודש</span>
+                  <span className="font-medium">{usageCount} / {usageLimit}</span>
+                </div>
+                <Progress value={Math.min((usageCount / usageLimit) * 100, 100)} className="h-1.5" />
+              </div>
+            )}
             {/* Generate button */}
             <div className="shrink-0 border-t border-gray-200 p-3">
               <button
@@ -931,6 +998,7 @@ export default function GeneratePage() {
               >
                 {status === 'processing'
                   ? <><Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />מעבד...</>
+                  : isFreeTier ? 'צפייה חינמית'
                   : !user ? 'נדרשת התחברות' : 'בנה דף עיון'}
               </button>
             </div>
@@ -1174,6 +1242,13 @@ export default function GeneratePage() {
               </div>
             )}
 
+
+          <PaywallModal
+            isOpen={showPaywall}
+            onClose={() => setShowPaywall(false)}
+            onSubscribe={handleSubscribe}
+            isLoading={isSubscribing}
+          />
           </main>
         </div>
       )}

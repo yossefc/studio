@@ -100,8 +100,11 @@ export function PaywallModal({
             )}
           </Button>
           <p className="text-center text-xs text-gray-400">
-            התשלום מאובטח באמצעות{' '}
-            <span className="font-semibold text-gray-500">Stripe</span>
+            תשלום מאובטח דרך{' '}
+            <span className="font-semibold text-gray-500">PayPlus</span>
+            {' '}&#xB7; ניתן לשלם ב-
+            <span className="font-semibold text-gray-500">Bit</span>
+            {' '}או כרטיס אשראי
           </p>
           <button
             onClick={onClose}
