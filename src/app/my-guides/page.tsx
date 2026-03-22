@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import Link from 'next/link';
 import {
@@ -7,6 +7,7 @@ import {
   ExternalLink,
   FileText,
   Loader2,
+  PanelLeft,
   Pencil,
   Plus,
   Printer,
@@ -383,8 +384,11 @@ export default function MyGuidesPage() {
   const [isPrintAllLoading, setIsPrintAllLoading] = useState(false);
   const [isExportAllLoading, setIsExportAllLoading] = useState(false);
   const [isExportSummariesLoading, setIsExportSummariesLoading] = useState(false);
+  const [isExportMenuOpen, setIsExportMenuOpen] = useState(false);
+  const [isSimanimPanelOpen, setIsSimanimPanelOpen] = useState(true);
   const [exportError, setExportError] = useState<string | null>(null);
   const printStyleRef = useRef<HTMLStyleElement | null>(null);
+  const exportMenuRef = useRef<HTMLDivElement | null>(null);
 
   const [isEditingSummary, setIsEditingSummary] = useState(false);
   const [editedSummaryText, setEditedSummaryText] = useState('');
@@ -414,6 +418,19 @@ export default function MyGuidesPage() {
     }, 200);
     return () => clearTimeout(timer);
   }, [printAllData]);
+
+  useEffect(() => {
+    const handlePointerDown = (event: globalThis.MouseEvent) => {
+      const target = event.target;
+      if (!(target instanceof Node)) return;
+      if (exportMenuRef.current && !exportMenuRef.current.contains(target)) {
+        setIsExportMenuOpen(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handlePointerDown);
+    return () => document.removeEventListener('mousedown', handlePointerDown);
+  }, []);
 
   const guidesQuery = useMemoFirebase(() => {
     if (!user || !firestore) {
@@ -750,7 +767,7 @@ export default function MyGuidesPage() {
     <div className="flex h-screen flex-col overflow-hidden bg-white">
       <Navigation />
 
-      {/* ── Toolbar ── */}
+      {/* ג”€ג”€ Toolbar ג”€ג”€ */}
       <div className="flex shrink-0 items-center gap-3 border-b border-gray-200 bg-white px-4 py-2 pt-14 print:hidden" dir="rtl">
         <h1 className="shrink-0 text-sm font-semibold text-gray-800">הספריה שלי</h1>
         <div className="relative max-w-xs flex-1">
@@ -766,6 +783,25 @@ export default function MyGuidesPage() {
         <span className="shrink-0 text-xs text-gray-400">
           {totalEntries} ביאורים · {totalSimanim} סימנים
         </span>
+        <button
+          type="button"
+          onClick={() => setIsSimanimPanelOpen((prev) => !prev)}
+          title={isSimanimPanelOpen ? 'סגור עץ סימנים' : 'פתח עץ סימנים'}
+          className={cn(
+            'flex h-7 shrink-0 items-center gap-1.5 rounded-md border px-2.5 text-xs transition-colors',
+            isSimanimPanelOpen
+              ? 'border-gray-300 bg-gray-100 text-gray-800'
+              : 'border-gray-200 text-gray-500 hover:border-gray-300 hover:text-gray-800'
+          )}
+        >
+          <PanelLeft className="h-3.5 w-3.5" />
+          <span>סימנים</span>
+          {!isSimanimPanelOpen && totalSimanim > 0 && (
+            <span className="rounded-full bg-gray-200 px-1.5 text-[10px] font-semibold text-gray-600">
+              {totalSimanim}
+            </span>
+          )}
+        </button>
         <Button asChild size="sm" className="h-7 shrink-0 rounded-md bg-gray-900 px-3 text-xs text-white hover:bg-gray-700">
           <Link href="/generate">
             <Plus className="ml-1 h-3 w-3" />
@@ -774,7 +810,7 @@ export default function MyGuidesPage() {
         </Button>
       </div>
 
-      {/* ── States ── */}
+      {/* ג”€ג”€ States ג”€ג”€ */}
       {!user && !isLoading ? (
         <div className="flex flex-1 items-center justify-center" dir="rtl">
           <div className="space-y-3 text-center">
@@ -804,10 +840,11 @@ export default function MyGuidesPage() {
         </div>
       ) : (
 
-        /* ── Main layout ── */
+        /* ג”€ג”€ Main layout ג”€ג”€ */
         <div id="main-layout" className="flex flex-1 overflow-hidden">
 
-          {/* ── Sidebar tree ── */}
+          {/* ג”€ג”€ Sidebar tree ג”€ג”€ */}
+          {isSimanimPanelOpen && (
           <aside className="flex w-60 shrink-0 flex-col overflow-hidden border-l border-gray-200 print:hidden">
             <ScrollArea className="flex-1">
               {hierarchy.length === 0 ? (
@@ -926,8 +963,9 @@ export default function MyGuidesPage() {
               )}
             </ScrollArea>
           </aside>
+          )}
 
-          {/* ── Content area ── */}
+          {/* ג”€ג”€ Content area ג”€ג”€ */}
           <main className="flex flex-1 flex-col overflow-hidden">
             {activeGuide ? (
               <>
@@ -940,105 +978,113 @@ export default function MyGuidesPage() {
                         {formatGuideDate(activeGuide.createdAt)} · {activeGuideSources.length} מקורות
                       </span>
                     </div>
-                    <button
-                      type="button"
-                      onClick={clearActiveGuide}
-                      className="flex items-center gap-1 rounded-md border border-gray-200 px-2.5 py-1.5 text-xs text-gray-500 hover:border-gray-300 hover:text-gray-900"
-                    >
-                      <X className="h-3.5 w-3.5" />
-                      סגור
-                    </button>
-                  </div>
-
-                  <div className="flex flex-wrap items-stretch gap-3">
-                    <section className="min-w-[280px] flex-1 rounded-xl border border-gray-200 bg-gray-50/70 p-3">
-                      <div className="mb-3">
-                        <p className="text-[11px] font-semibold uppercase tracking-wider text-gray-400">Export</p>
-                        <p className="mt-1 text-xs text-gray-500">
-                          {isDirector
-                            ? 'כל אפשרויות הייצוא וההדפסה זמינות לחשבון המנהל.'
-                            : 'למשתמש רגיל זמין רק ייצוא הסיכום.'}
-                        </p>
-                      </div>
-
-                      <div className="flex flex-wrap gap-2">
+                    <div className="flex items-center gap-2">
+                      <div ref={exportMenuRef} className="relative">
                         <button
                           type="button"
-                          onClick={handleExportSimanSummaries}
-                          disabled={isExportSummariesLoading}
-                          className="flex min-w-[220px] flex-1 items-center justify-between gap-3 rounded-lg border border-emerald-200 bg-white px-3 py-2.5 text-right transition hover:border-emerald-300 hover:bg-emerald-50 disabled:opacity-40"
+                          onClick={() => setIsExportMenuOpen((prev) => !prev)}
+                          className="flex items-center gap-1 rounded-md border border-gray-200 px-2.5 py-1.5 text-xs text-gray-600 hover:border-gray-300 hover:text-gray-900"
                         >
-                          <span className="min-w-0">
-                            <span className="block text-sm font-medium text-gray-900">ייצוא סיכומי הסימן</span>
-                            <span className="block text-xs text-gray-500">Google Docs עם הסיכומים בלבד</span>
-                          </span>
-                          {isExportSummariesLoading
-                            ? <Loader2 className="h-4 w-4 shrink-0 animate-spin text-emerald-700" />
-                            : <FileText className="h-4 w-4 shrink-0 text-emerald-700" />}
+                          <ChevronDown className={cn('h-3.5 w-3.5 transition-transform', isExportMenuOpen && 'rotate-180')} />
+                          ??????
                         </button>
+                        {isExportMenuOpen && (
+                          <div className="absolute left-0 top-full z-20 mt-2 w-64 rounded-xl border border-gray-200 bg-white p-2 shadow-lg">
+                            <p className="px-2 pb-2 text-[11px] text-gray-400">
+                              {isDirector
+                                ? '?? ???????? ?????? ??????? ?????? ?????? ?????.'
+                                : '?????? ???? ???? ?? ????? ??????.'}
+                            </p>
+                            <div className="space-y-1">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setIsExportMenuOpen(false);
+                                  void handleExportSimanSummaries();
+                                }}
+                                disabled={isExportSummariesLoading}
+                                className="flex w-full items-center justify-between rounded-lg px-2.5 py-2 text-right text-sm text-gray-700 hover:bg-emerald-50 disabled:opacity-40"
+                              >
+                                <span>????? ?????? ?????</span>
+                                {isExportSummariesLoading
+                                  ? <Loader2 className="h-4 w-4 animate-spin text-emerald-700" />
+                                  : <FileText className="h-4 w-4 text-emerald-700" />}
+                              </button>
 
-                        {isDirector && (
-                          <button
-                            type="button"
-                            onClick={handleExportSiman}
-                            disabled={isExportAllLoading}
-                            className="flex min-w-[220px] flex-1 items-center justify-between gap-3 rounded-lg border border-gray-200 bg-white px-3 py-2.5 text-right transition hover:border-gray-300 hover:bg-gray-100 disabled:opacity-40"
-                          >
-                            <span className="min-w-0">
-                              <span className="block text-sm font-medium text-gray-900">ייצוא הסימן המלא</span>
-                              <span className="block text-xs text-gray-500">מקורות, ביאורים וסיכום ל-Google Docs</span>
-                            </span>
-                            {isExportAllLoading
-                              ? <Loader2 className="h-4 w-4 shrink-0 animate-spin text-gray-700" />
-                              : <ExternalLink className="h-4 w-4 shrink-0 text-gray-700" />}
-                          </button>
+                              {isDirector && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setIsExportMenuOpen(false);
+                                    void handleExportSiman();
+                                  }}
+                                  disabled={isExportAllLoading}
+                                  className="flex w-full items-center justify-between rounded-lg px-2.5 py-2 text-right text-sm text-gray-700 hover:bg-gray-100 disabled:opacity-40"
+                                >
+                                  <span>????? ????? ????</span>
+                                  {isExportAllLoading
+                                    ? <Loader2 className="h-4 w-4 animate-spin text-gray-700" />
+                                    : <ExternalLink className="h-4 w-4 text-gray-700" />}
+                                </button>
+                              )}
+
+                              {isDirector && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setIsExportMenuOpen(false);
+                                    void handlePrintSiman();
+                                  }}
+                                  disabled={isPrintAllLoading}
+                                  className="flex w-full items-center justify-between rounded-lg px-2.5 py-2 text-right text-sm text-gray-700 hover:bg-gray-100 disabled:opacity-40"
+                                >
+                                  <span>????? ???? ???</span>
+                                  {isPrintAllLoading
+                                    ? <Loader2 className="h-4 w-4 animate-spin text-gray-700" />
+                                    : <Printer className="h-4 w-4 text-gray-700" />}
+                                </button>
+                              )}
+
+                              {isDirector && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setIsExportMenuOpen(false);
+                                    window.print();
+                                  }}
+                                  className="flex w-full items-center justify-between rounded-lg px-2.5 py-2 text-right text-sm text-gray-700 hover:bg-gray-100"
+                                >
+                                  <span>????? ????</span>
+                                  <Printer className="h-4 w-4 text-gray-700" />
+                                </button>
+                              )}
+
+                              {isDirector && activeGuide.googleDocUrl && (
+                                <a
+                                  href={activeGuide.googleDocUrl}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  onClick={() => setIsExportMenuOpen(false)}
+                                  className="flex w-full items-center justify-between rounded-lg px-2.5 py-2 text-right text-sm text-gray-700 hover:bg-gray-100"
+                                >
+                                  <span>??? ?-Google Docs</span>
+                                  <ExternalLink className="h-4 w-4 text-gray-700" />
+                                </a>
+                              )}
+                            </div>
+                          </div>
                         )}
                       </div>
-                    </section>
 
-                    {isDirector && (
-                      <section className="min-w-[260px] rounded-xl border border-gray-200 bg-white p-3">
-                        <div className="mb-3">
-                          <p className="text-[11px] font-semibold uppercase tracking-wider text-gray-400">Admin Tools</p>
-                          <p className="mt-1 text-xs text-gray-500">כלי עבודה מלאים לחשבון המנהל.</p>
-                        </div>
-
-                        <div className="flex flex-wrap gap-2">
-                          <button
-                            type="button"
-                            onClick={handlePrintSiman}
-                            disabled={isPrintAllLoading}
-                            className="flex items-center gap-1 rounded-md border border-gray-200 px-2.5 py-1.5 text-xs text-gray-600 hover:border-gray-300 hover:text-gray-900 disabled:opacity-40"
-                          >
-                            {isPrintAllLoading
-                              ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                              : <Printer className="h-3.5 w-3.5" />}
-                            הדפסת סימן מלא
-                          </button>
-
-                          <button
-                            type="button"
-                            onClick={() => window.print()}
-                            className="flex items-center gap-1 rounded-md border border-gray-200 px-2.5 py-1.5 text-xs text-gray-600 hover:border-gray-300 hover:text-gray-900"
-                          >
-                            <Printer className="h-3.5 w-3.5" />
-                            הדפסת עמוד
-                          </button>
-
-                          {activeGuide.googleDocUrl && (
-                            <a
-                              href={activeGuide.googleDocUrl}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="flex items-center gap-1 rounded-md border border-gray-200 px-2.5 py-1.5 text-xs text-gray-600 hover:border-gray-300 hover:text-gray-900"
-                            >
-                              <ExternalLink className="h-3.5 w-3.5" />
-                              Google Docs
-                            </a>
-                          )}
-                        </div>
-                      </section>
-                    )}
+                      <button
+                        type="button"
+                        onClick={clearActiveGuide}
+                        className="flex items-center gap-1 rounded-md border border-gray-200 px-2.5 py-1.5 text-xs text-gray-500 hover:border-gray-300 hover:text-gray-900"
+                      >
+                        <X className="h-3.5 w-3.5" />
+                        ????????
+                      </button>
+                    </div>
                   </div>
                 </div>
 
@@ -1220,9 +1266,9 @@ export default function MyGuidesPage() {
                         <div className="flex shrink-0 items-center gap-0.5 border-b border-gray-100 bg-gray-50 px-2 py-1" dir="ltr">
                           <button type="button" onClick={() => insertFormat('\n## ', '')} className="rounded px-1.5 py-0.5 text-[11px] font-bold text-gray-500 hover:bg-gray-200 hover:text-gray-800" title="כותרת">##</button>
                           <button type="button" onClick={() => insertFormat('**', '**')} className="rounded px-1.5 py-0.5 text-[11px] font-bold text-gray-500 hover:bg-gray-200 hover:text-gray-800" title="מודגש">B</button>
-                          <button type="button" onClick={() => insertFormat('\n- ', '')} className="rounded px-1.5 py-0.5 text-[11px] text-gray-500 hover:bg-gray-200 hover:text-gray-800" title="נקודה">•—</button>
+                          <button type="button" onClick={() => insertFormat('\n- ', '')} className="rounded px-1.5 py-0.5 text-[11px] text-gray-500 hover:bg-gray-200 hover:text-gray-800" title="נקודה">ג€¢ג€”</button>
                           <div className="mx-1 h-3 w-px bg-gray-300" />
-                          <button type="button" onClick={() => insertFormat('\n---\n', '')} className="rounded px-1.5 py-0.5 text-[11px] text-gray-500 hover:bg-gray-200 hover:text-gray-800" title="קו הפרדה">—</button>
+                          <button type="button" onClick={() => insertFormat('\n---\n', '')} className="rounded px-1.5 py-0.5 text-[11px] text-gray-500 hover:bg-gray-200 hover:text-gray-800" title="קו הפרדה">ג€”</button>
                         </div>
                       )}
 
@@ -1255,7 +1301,7 @@ export default function MyGuidesPage() {
                                     <ul className="space-y-1 text-gray-700">
                                       {section.items.map((item, ii) => (
                                         <li key={ii} className="flex gap-2">
-                                          <span className="shrink-0 text-gray-400">•</span>
+                                          <span className="shrink-0 text-gray-400">ג€¢</span>
                                           <span>{renderAccentText(item, 'text-gray-900')}</span>
                                         </li>
                                       ))}
@@ -1304,7 +1350,7 @@ export default function MyGuidesPage() {
         </div>
       )}
 
-      {/* ── Print-all section (screen: hidden; print: shown via injected CSS) ── */}
+      {/* ג”€ג”€ Print-all section (screen: hidden; print: shown via injected CSS) ג”€ג”€ */}
       {printAllData && (
         <div id="print-all-section" className="hidden p-8" dir="rtl">
           {printAllData.map(({ guide, chunks: gChunks }, guideIdx) => {
@@ -1369,7 +1415,7 @@ export default function MyGuidesPage() {
                           <ul className="mt-1 space-y-0.5 text-sm text-gray-700">
                             {sec.items.map((item, ii) => (
                               <li key={ii} className="flex gap-2">
-                                <span className="shrink-0 text-gray-400">•</span>
+                                <span className="shrink-0 text-gray-400">ג€¢</span>
                                 <span>{item}</span>
                               </li>
                             ))}
