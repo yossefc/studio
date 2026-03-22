@@ -1,4 +1,4 @@
-﻿'use client';
+'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { Navigation } from '@/components/Navigation';
@@ -216,8 +216,8 @@ export default function GeneratePage() {
   const firestore = useFirestore();
   const router = useRouter();
 
-  const renderAccentText = (text: string, accentClass: string) =>
-    text.split('**').map((part, i) =>
+  const renderAccentText = (text: string | undefined | null, accentClass: string) =>
+    (text ?? "").split("**").map((part, i) =>
       i % 2 === 1
         ? <strong key={i} className={cn('font-bold', accentClass)}>{part}</strong>
         : part,
@@ -1028,14 +1028,16 @@ export default function GeneratePage() {
                                   <p className="font-sefer text-base leading-7 text-gray-800">
                                     {chunk.rawText.trim()}
                                   </p>
-                                  <div
-                                    className={cn(
-                                      'whitespace-pre-wrap border-r-2 py-2 pr-3 text-sm leading-7 text-gray-600',
-                                      theme.borderAccent,
-                                    )}
-                                  >
-                                    {renderAccentText(chunk.explanation, theme.accentClass)}
-                                  </div>
+                                  {chunk.explanation && (
+                                    <div
+                                      className={cn(
+                                        'whitespace-pre-wrap border-r-2 py-2 pr-3 text-sm leading-7 text-gray-600',
+                                        theme.borderAccent,
+                                      )}
+                                    >
+                                      {renderAccentText(chunk.explanation, theme.accentClass)}
+                                    </div>
+                                  )}
                                 </div>
                               ))}
                             </div>
