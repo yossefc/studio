@@ -5,9 +5,10 @@ import { Navigation } from '@/components/Navigation';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
-    ChevronDown, ChevronLeft, Book, Shield, ShieldX, Trash2, BarChart3, DollarSign, Users, Clock3,
+    ChevronDown, ChevronLeft, Book, Shield, ShieldX, Trash2, BarChart3, DollarSign, Users, Clock3, LayoutDashboard,
 } from 'lucide-react';
-import { fetchRabanutData, deleteRabanutChunk, SOURCE_LABELS } from '@/app/actions/admin-guides';
+import { fetchRabanutData, deleteRabanutChunk } from '@/app/actions/admin-guides';
+import { SOURCE_LABELS } from '@/lib/admin-guide-labels';
 import type { RabanutSection, RabanutTextChunk } from '@/app/actions/admin-guides';
 import { fetchAdminManagedUsers, updateAdminUserUsagePolicy } from '@/app/actions/admin-user-policies';
 import type { AdminManagedUser } from '@/app/actions/admin-user-policies';
@@ -327,6 +328,14 @@ export default function AdminGuidesPage() {
             <Navigation />
             <main className="pt-24 px-6 max-w-4xl mx-auto w-full">
                 <header className="mb-8">
+                    <div className="mb-4 flex items-center gap-3">
+                        <Button asChild variant="outline" size="sm" className="h-8 gap-1.5 rounded-xl">
+                            <Link href="/admin/dashboard">
+                                <LayoutDashboard className="h-3.5 w-3.5" />
+                                לוח בקרה
+                            </Link>
+                        </Button>
+                    </div>
                     <h1 className="text-3xl font-headline text-primary mb-1 flex items-center gap-3">
                         <Shield className="w-7 h-7" />
                         ניהול ביאורים

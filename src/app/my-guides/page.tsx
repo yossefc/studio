@@ -313,9 +313,27 @@ function buildHierarchy(guides: GuideRecord[]): SectionGroup[] {
 }
 
 function renderAccentText(text: string, accentClass: string) {
-  return text.split('**').map((part, index) => (
-    index % 2 === 1 ? <strong key={index} className={cn('font-bold', accentClass)}>{part}</strong> : part
+  const renderBoldSegments = (value: string, keyPrefix: string) => value.split('**').map((part, index) => (
+    index % 2 === 1
+      ? <strong key={`${keyPrefix}-b-${index}`} className={cn('font-bold', accentClass)}>{part}</strong>
+      : part
   ));
+
+  return text
+    .split(/(<u>.*?<\/u>)/g)
+    .filter(Boolean)
+    .flatMap((segment, index) => {
+      const underlineMatch = segment.match(/^<u>([\s\S]*?)<\/u>$/);
+      if (!underlineMatch) {
+        return renderBoldSegments(segment, `segment-${index}`);
+      }
+
+      return (
+        <u key={`segment-${index}`} className="underline underline-offset-2">
+          {renderBoldSegments(underlineMatch[1] ?? '', `segment-${index}`)}
+        </u>
+      );
+    });
 }
 
 function parseSummarySections(summaryText: string): SummarySection[] {

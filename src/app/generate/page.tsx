@@ -232,11 +232,27 @@ export default function GeneratePage() {
     const normalized = (text ?? '')
       .replace(/\n{3,}/g, '\n\n')
       .replace(/([^\n])\n([^\n])/g, '$1 $2');
-    return normalized.split('**').map((part, i) =>
+    const renderBoldSegments = (value: string, keyPrefix: string) => value.split('**').map((part, i) =>
       i % 2 === 1
-        ? <strong key={i} className={cn('font-bold', accentClass)}>{part}</strong>
-        : part,
+        ? <strong key={`${keyPrefix}-b-${i}`} className={cn('font-bold', accentClass)}>{part}</strong>
+        : part
     );
+
+    return normalized
+      .split(/(<u>.*?<\/u>)/g)
+      .filter(Boolean)
+      .flatMap((segment, segmentIndex) => {
+        const underlineMatch = segment.match(/^<u>([\s\S]*?)<\/u>$/);
+        if (!underlineMatch) {
+          return renderBoldSegments(segment, `segment-${segmentIndex}`);
+        }
+
+        return (
+          <u key={`segment-${segmentIndex}`} className="underline underline-offset-2">
+            {renderBoldSegments(underlineMatch[1] ?? '', `segment-${segmentIndex}`)}
+          </u>
+        );
+      });
   };
 
   const hydratePreviewFromSavedGuide = useCallback(async (guideId: string, rawGuide: Record<string, unknown>) => {

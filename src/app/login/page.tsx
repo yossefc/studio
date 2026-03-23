@@ -63,7 +63,10 @@ export default function LoginPage() {
     try {
       await signInWithPopup(auth, googleProvider);
     } catch (err: any) {
-      console.error('[Auth] Google sign-in failed:', err);
+      const code = (err as { code?: string })?.code ?? '';
+      if (code !== 'auth/popup-closed-by-user') {
+        console.error('[Auth] Google sign-in failed:', err);
+      }
       setError(getAuthErrorMessage(err, hostLabel));
       setIsSubmitting(false);
     }

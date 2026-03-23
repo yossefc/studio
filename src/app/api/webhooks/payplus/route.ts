@@ -30,7 +30,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createHmac, timingSafeEqual } from 'crypto';
 import { getAdminDb } from '@/server/firebase-admin';
-import { Timestamp } from 'firebase-admin/firestore';
+import { FieldValue, Timestamp } from 'firebase-admin/firestore';
 import { saveUserUsagePolicy } from '@/lib/usage-policy';
 
 // ---------------------------------------------------------------------------
@@ -77,6 +77,7 @@ async function activateSubscription(
   transactionUid: string,
   recurringToken: string | null,
   currentPeriodEnd: number, // Unix timestamp (seconds)
+  paymentSum: number,
 ): Promise<void> {
   const db = getAdminDb();
   await db
@@ -96,6 +97,14 @@ async function activateSubscription(
       { merge: true },
     );
 
+  // Increment cumulative revenue counter
+  if (paymentSum > 0) {
+    await db.collection('users').doc(uid).set(
+      { totalSpent: FieldValue.increment(paymentSum) },
+      { merge: true },
+    );
+  }
+
   // Upgrade usage policy to 'standard' plan (30 generations/month)
   await saveUserUsagePolicy(uid, null, { planId: 'standard' }, 'payplus-webhook');
 }
@@ -108,6 +117,7 @@ async function renewSubscription(
   uid: string,
   transactionUid: string,
   currentPeriodEnd: number,
+  paymentSum: number,
 ): Promise<void> {
   const db = getAdminDb();
   await db
@@ -124,6 +134,14 @@ async function renewSubscription(
       },
       { merge: true },
     );
+
+  // Increment cumulative revenue counter
+  if (paymentSum > 0) {
+    await db.collection('users').doc(uid).set(
+      { totalSpent: FieldValue.increment(paymentSum) },
+      { merge: true },
+    );
+  }
 }
 
 /**
@@ -185,6 +203,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const recurringToken   = typeof payload.credit_card_token === 'string'
     ? payload.credit_card_token
     : null;
+  const paymentSum       = typeof payload.payment_sum === 'number'
+    ? payload.payment_sum
+    : parseFloat(String(payload.payment_sum ?? '0')) || 0;
 
   console.info(
     `[PayPlus Webhook] Received: type=${transactionType} status=${statusCode} uid=${uid}`,
@@ -225,11 +246,11 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   try {
     if (transactionType === 'RECURRING_FIRST' || transactionType === 'REGULAR') {
       // First payment → activate subscription and store recurring token
-      await activateSubscription(uid, transactionUid, recurringToken, currentPeriodEnd);
+      await activateSubscription(uid, transactionUid, recurringToken, currentPeriodEnd, paymentSum);
       console.info(`[PayPlus Webhook] Activated subscription for uid=${uid}`);
     } else if (transactionType === 'RECURRING') {
       // Subsequent monthly charge → extend subscription period
-      await renewSubscription(uid, transactionUid, currentPeriodEnd);
+      await renewSubscription(uid, transactionUid, currentPeriodEnd, paymentSum);
       console.info(`[PayPlus Webhook] Renewed subscription for uid=${uid}`);
     } else {
       console.info(`[PayPlus Webhook] Unhandled transaction_type=${transactionType} — skipping.`);

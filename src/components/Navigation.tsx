@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { BookOpen, History, PlusCircle, User as UserIcon, LogOut } from 'lucide-react';
+import { BookOpen, History, PlusCircle, User as UserIcon, LogOut, Shield } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useUser, useAuth } from '@/firebase';
 import { Button } from '@/components/ui/button';
@@ -16,6 +16,9 @@ export function Navigation() {
   const handleLogout = () => {
     if (auth) signOut(auth);
   };
+
+  const ADMIN_EMAIL = 'yossefcohzar@gmail.com';
+  const isAdmin = (user?.email ?? '').toLowerCase() === ADMIN_EMAIL.toLowerCase();
 
   const links = [
     { href: '/', label: 'ראשי', icon: BookOpen },
@@ -40,6 +43,19 @@ export function Navigation() {
           <span>{label}</span>
         </Link>
       ))}
+
+      {isAdmin && (
+        <Link
+          href="/admin/dashboard"
+          className={cn(
+            'flex flex-col items-center gap-1 rounded-md px-3 py-1 text-xs font-medium transition-colors md:flex-row md:gap-2 md:text-sm',
+            pathname.startsWith('/admin') ? 'bg-primary/5 text-primary' : 'text-muted-foreground hover:text-foreground',
+          )}
+        >
+          <Shield className="h-5 w-5" />
+          <span>ניהול</span>
+        </Link>
+      )}
 
       <div className="mr-auto flex items-center gap-4">
         {user ? (

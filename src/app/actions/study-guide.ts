@@ -36,6 +36,7 @@ import { assertActionRateLimit, getRequestIpAddress } from '@/lib/rate-limit';
 import { getUserUsagePolicy } from '@/lib/usage-policy';
 import { ADMIN_EMAIL } from './admin-auth';
 import { isFreeTierContent } from '@/lib/free-tier';
+import { isAdminUser } from '@/lib/admin-role';
 
 export interface ProcessedChunk {
   id: string;
@@ -998,7 +999,7 @@ export async function generateMultiSourceStudyGuide(
       userId = authUser.uid;
 
       // Check active subscription (admin email is always allowed)
-      const isAdmin = (authUser.email ?? '').toLowerCase() === ADMIN_EMAIL.toLowerCase();
+      const isAdmin = await isAdminUser(authUser);
       if (!isAdmin) {
         const sub = await getSubscriptionStatusFromDb(userId);
         if (!sub.isActive) {
@@ -1012,7 +1013,8 @@ export async function generateMultiSourceStudyGuide(
         email: authUser.email,
       });
 
-      if (!usagePolicy.unlimited) {
+      const effectiveUnlimited = isAdmin || usagePolicy.unlimited;
+      if (!effectiveUnlimited) {
         await assertActionRateLimit({
           action: 'study-guide-generation',
           userId,

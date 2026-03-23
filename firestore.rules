@@ -21,6 +21,13 @@ service cloud.firestore {
       return isSignedIn() && request.auth.uid == userId;
     }
 
+    // User profile document — owner can read (e.g. role field), server writes only
+    // This prevents clients from setting role: 'admin' on their own document.
+    match /users/{userId} {
+      allow get: if isOwner(userId);
+      allow write: if false;
+    }
+
     // Study guides (private per user)
     match /users/{userId}/studyGuides/{studyGuideId} {
       allow get, list: if isOwner(userId);
