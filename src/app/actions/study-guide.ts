@@ -148,8 +148,10 @@ function getMonthBounds(date = new Date()): { start: Timestamp; end: Timestamp }
 }
 
 async function assertMonthlyQuotaAvailable(userId: string, monthlyLimit: number): Promise<void> {
-  if (!Number.isFinite(monthlyLimit) || monthlyLimit < 0) {
-    return;
+  // Fail CLOSED: if the limit is invalid or zero, block the action.
+  // Never silently allow unlimited access due to a misconfigured policy.
+  if (!Number.isFinite(monthlyLimit) || monthlyLimit <= 0) {
+    throw new Error('Monthly generation quota configuration is invalid.');
   }
 
   const db = getAdminDb();

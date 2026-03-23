@@ -29,7 +29,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { createHmac, timingSafeEqual } from 'crypto';
-import { getAdminDb } from '@/server/firebase-admin';
+import { getAdminAuth, getAdminDb } from '@/server/firebase-admin';
 import { FieldValue, Timestamp } from 'firebase-admin/firestore';
 import { saveUserUsagePolicy } from '@/lib/usage-policy';
 
@@ -65,6 +65,28 @@ function verifyPayPlusSignature(rawBody: string, receivedSignature: string): boo
 }
 
 // ---------------------------------------------------------------------------
+// Firebase UID verification
+// ---------------------------------------------------------------------------
+
+/**
+ * Verifies that the uid corresponds to a real Firebase Auth user.
+ * Returns true if the user exists, false otherwise.
+ * We return 200 (not 400) on unknown uid to avoid PayPlus retrying forever
+ * for a phantom UID that will never exist.
+ */
+async function firebaseUserExists(uid: string): Promise<boolean> {
+  try {
+    await getAdminAuth().getUser(uid);
+    return true;
+  } catch (err: unknown) {
+    const code = (err as { code?: string })?.code ?? '';
+    if (code === 'auth/user-not-found') return false;
+    // Re-throw unexpected errors (network, quota, etc.) so the webhook retries
+    throw err;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Firestore helpers
 // ---------------------------------------------------------------------------
 
@@ -80,29 +102,34 @@ async function activateSubscription(
   paymentSum: number,
 ): Promise<void> {
   const db = getAdminDb();
-  await db
-    .collection('users')
-    .doc(uid)
-    .collection('subscriptionStatus')
-    .doc('current')
-    .set(
-      {
-        isActive: true,
-        payplusTransactionUid: transactionUid,
-        payplusRecurringToken: recurringToken ?? null,
-        currentPeriodEnd,
-        planId: 'standard',
-        updatedAt: Timestamp.now(),
-      },
-      { merge: true },
-    );
+  const statusRef = db.collection('users').doc(uid).collection('subscriptionStatus').doc('current');
+  const userRef = db.collection('users').doc(uid);
 
-  // Increment cumulative revenue counter
-  if (paymentSum > 0) {
-    await db.collection('users').doc(uid).set(
-      { totalSpent: FieldValue.increment(paymentSum) },
-      { merge: true },
-    );
+  // Idempotency: use a transaction to check if this transactionUid was already processed.
+  // PayPlus retries webhooks on 5xx / timeout — must not double-count.
+  let alreadyProcessed = false;
+  await db.runTransaction(async (tx) => {
+    const statusSnap = await tx.get(statusRef);
+    if (statusSnap.exists && statusSnap.data()?.payplusTransactionUid === transactionUid) {
+      alreadyProcessed = true;
+      return;
+    }
+    tx.set(statusRef, {
+      isActive: true,
+      payplusTransactionUid: transactionUid,
+      payplusRecurringToken: recurringToken ?? null,
+      currentPeriodEnd,
+      planId: 'standard',
+      updatedAt: Timestamp.now(),
+    }, { merge: true });
+    if (paymentSum > 0) {
+      tx.set(userRef, { totalSpent: FieldValue.increment(Math.max(0, paymentSum)) }, { merge: true });
+    }
+  });
+
+  if (alreadyProcessed) {
+    console.info(`[PayPlus Webhook] activateSubscription: transactionUid=${transactionUid} already processed — skipping.`);
+    return;
   }
 
   // Upgrade usage policy to 'standard' plan (30 generations/month)
@@ -120,27 +147,29 @@ async function renewSubscription(
   paymentSum: number,
 ): Promise<void> {
   const db = getAdminDb();
-  await db
-    .collection('users')
-    .doc(uid)
-    .collection('subscriptionStatus')
-    .doc('current')
-    .set(
-      {
-        isActive: true,
-        payplusTransactionUid: transactionUid,
-        currentPeriodEnd,
-        updatedAt: Timestamp.now(),
-      },
-      { merge: true },
-    );
+  const statusRef = db.collection('users').doc(uid).collection('subscriptionStatus').doc('current');
+  const userRef = db.collection('users').doc(uid);
 
-  // Increment cumulative revenue counter
-  if (paymentSum > 0) {
-    await db.collection('users').doc(uid).set(
-      { totalSpent: FieldValue.increment(paymentSum) },
-      { merge: true },
-    );
+  let alreadyProcessed = false;
+  await db.runTransaction(async (tx) => {
+    const statusSnap = await tx.get(statusRef);
+    if (statusSnap.exists && statusSnap.data()?.payplusTransactionUid === transactionUid) {
+      alreadyProcessed = true;
+      return;
+    }
+    tx.set(statusRef, {
+      isActive: true,
+      payplusTransactionUid: transactionUid,
+      currentPeriodEnd,
+      updatedAt: Timestamp.now(),
+    }, { merge: true });
+    if (paymentSum > 0) {
+      tx.set(userRef, { totalSpent: FieldValue.increment(Math.max(0, paymentSum)) }, { merge: true });
+    }
+  });
+
+  if (alreadyProcessed) {
+    console.info(`[PayPlus Webhook] renewSubscription: transactionUid=${transactionUid} already processed — skipping.`);
   }
 }
 
@@ -217,6 +246,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       console.warn('[PayPlus Webhook] SUBSCRIPTION_CANCELLED: missing client_reference_uid.');
       return NextResponse.json({ received: true });
     }
+    if (!await firebaseUserExists(uid)) {
+      console.warn(`[PayPlus Webhook] SUBSCRIPTION_CANCELLED: uid=${uid} not found in Firebase Auth — ignoring.`);
+      return NextResponse.json({ received: true });
+    }
     try {
       await deactivateSubscription(uid);
       console.info(`[PayPlus Webhook] Deactivated subscription for uid=${uid}`);
@@ -238,7 +271,14 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: 'Missing client_reference_uid.' }, { status: 400 });
   }
 
-  // 7. currentPeriodEnd: PayPlus does not return the next billing date explicitly.
+  // 7. Verify the uid corresponds to a real Firebase Auth user before any write.
+  if (!await firebaseUserExists(uid)) {
+    console.warn(`[PayPlus Webhook] uid=${uid} not found in Firebase Auth — ignoring payment.`);
+    // Return 200 so PayPlus does not retry indefinitely for a phantom UID.
+    return NextResponse.json({ received: true });
+  }
+
+  // 8. currentPeriodEnd: PayPlus does not return the next billing date explicitly.
   //    We calculate it as now + 31 days (1 extra day as a grace period).
   //    Adjust if your billing cycle differs (e.g. quarterly → 92 days).
   const currentPeriodEnd = Math.floor(Date.now() / 1000) + 31 * 24 * 60 * 60;

@@ -525,6 +525,7 @@ export default function GeneratePage() {
   };
 
   const handleGenerate = async () => {
+    if (!user && !isFreeTier) { router.push('/login'); return; }
     if (!siman || !user || !firestore || selectedSources.length === 0) return;
     if (needsSeif && !seif) return;
     setStatus('processing');
@@ -603,7 +604,7 @@ export default function GeneratePage() {
     } catch (err: unknown) {
       console.error('[handleGenerate] Error:', err);
       if (isServerActionNetworkError(err)) {
-        setError('Server connection dropped, but generation continues in background. Keep this page open; it will appear when Firestore status becomes Preview.');
+        setError('החיבור לשרת נפסק, אך ההפקה ממשיכה ברקע. השאר את העמוד פתוח — הביאור יופיע כשהעיבוד יסתיים.');
         return;
       }
       setError(err instanceof Error ? err.message : 'Unexpected error. Please try again.');
@@ -686,7 +687,8 @@ export default function GeneratePage() {
     }
   };;
 
-  const isInteractionDisabled = isUserLoading || status === 'processing' || (!user && !isFreeTier);
+  const isInteractionDisabled = isUserLoading || status === 'processing';
+  const needsLogin = !user && !isFreeTier && !isUserLoading;
   const availableSources = SOURCE_OPTIONS
     .filter(opt => !opt.onlyOC || section === 'Orach Chayim')
     .filter(opt => section === 'Torah Ohr' ? opt.key === 'torah_ohr' : opt.key !== 'torah_ohr');
@@ -1009,13 +1011,13 @@ export default function GeneratePage() {
               <button
                 type="button"
                 onClick={handleGenerate}
-                disabled={isInteractionDisabled || !canGenerate}
+                disabled={isInteractionDisabled || (!needsLogin && !canGenerate)}
                 className="flex h-8 w-full items-center justify-center rounded-md bg-gray-900 text-sm font-medium text-white hover:bg-gray-700 disabled:opacity-50"
               >
                 {status === 'processing'
                   ? <><Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />מעבד...</>
                   : isFreeTier ? 'צפייה חינמית'
-                  : !user ? 'נדרשת התחברות' : 'בנה דף עיון'}
+                  : needsLogin ? 'התחבר כדי להמשיך' : 'בנה דף עיון'}
               </button>
             </div>
             </aside>
@@ -1082,6 +1084,12 @@ export default function GeneratePage() {
 
                 {/* Sources tabs */}
                 <div className="flex flex-1 flex-col overflow-hidden">
+                  {isFreeTier && !user && (
+                    <div className="flex shrink-0 items-center justify-between border-b border-amber-200 bg-amber-50 px-4 py-2" dir="rtl">
+                      <span className="text-xs text-amber-800">תצוגה מקדימה חינמית — אורח חיים סימן א׳</span>
+                      <a href="/login" className="text-xs font-semibold text-amber-900 underline underline-offset-2 hover:text-amber-700 transition-colors">התחבר לצפייה מלאה ←</a>
+                    </div>
+                  )}
                   <Tabs
                     defaultValue={previewSourceResults[0]?.sourceKey}
                     className="flex flex-1 flex-col overflow-hidden"
@@ -1264,6 +1272,7 @@ export default function GeneratePage() {
             onClose={() => setShowPaywall(false)}
             onSubscribe={handleSubscribe}
             isLoading={isSubscribing}
+            isLoggedIn={!!user}
           />
           </main>
         </div>

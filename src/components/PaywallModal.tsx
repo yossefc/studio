@@ -8,6 +8,7 @@ interface PaywallModalProps {
   onClose: () => void;
   onSubscribe: () => void;
   isLoading?: boolean;
+  isLoggedIn?: boolean;
 }
 
 const FEATURES = [
@@ -22,6 +23,7 @@ export function PaywallModal({
   onClose,
   onSubscribe,
   isLoading = false,
+  isLoggedIn = true,
 }: PaywallModalProps) {
   if (!isOpen) return null;
 
@@ -95,8 +97,10 @@ export function PaywallModal({
           >
             {isLoading ? (
               <Loader2 className="h-5 w-5 animate-spin" />
-            ) : (
+            ) : isLoggedIn ? (
               'הירשם עכשיו'
+            ) : (
+              'התחבר כדי להירשם'
             )}
           </Button>
           <p className="text-center text-xs text-gray-400">

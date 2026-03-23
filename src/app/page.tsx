@@ -1,4 +1,3 @@
-
 import { Button } from "@/components/ui/button";
 import { Navigation } from "@/components/Navigation";
 import Link from "next/link";
@@ -15,15 +14,23 @@ export default function Home() {
             הפוך את הלימוד שלך <br /> <span className="text-accent">למדריך הלכתי מעשי</span>
           </h1>
           <p className="text-lg md:text-xl text-muted-foreground max-w-2xl mx-auto">
-            Talmud משתמש בבינה מלאכותית מתקדמת כדי לנתח טקסטים תורניים, להסביר אותם בהקשרם ולסכם את המסקנות ההלכתיות למבחני הרבנות.
+            Talmud משתמש בבינה מלאכותית מתקדמת כדי לנתח טקסטים תורניים, להסביר אותם בהקשרם ולסכם את המסקנות ההלכותיות למבחני הרבנות.
           </p>
-          <div className="flex justify-center gap-4 pt-4">
-            <Button asChild size="lg" className="bg-primary hover:bg-primary/90 text-white px-8 h-14 rounded-xl text-lg">
-              <Link href="/generate">התחל עכשיו</Link>
-            </Button>
-            <Button asChild variant="outline" size="lg" className="h-14 rounded-xl px-8 text-lg">
-              <Link href="/my-guides">צפה בהיסטוריה</Link>
-            </Button>
+          <div className="flex flex-col items-center gap-3 pt-4">
+            <div className="flex justify-center gap-4">
+              <Button asChild size="lg" className="bg-primary hover:bg-primary/90 text-white px-8 h-14 rounded-xl text-lg">
+                <Link href="/generate">התחל עכשיו</Link>
+              </Button>
+              <Button asChild variant="outline" size="lg" className="h-14 rounded-xl px-8 text-lg">
+                <Link href="/my-guides">הביאורים שלי</Link>
+              </Button>
+            </div>
+            <p className="text-sm text-muted-foreground">
+              ניתן לנסות ללא חשבון —{" "}
+              <Link href="/generate" className="underline underline-offset-2 hover:text-foreground transition-colors">
+                צפה בביאור חינמי לאורח חיים סימן א׳
+              </Link>
+            </p>
           </div>
         </section>
 

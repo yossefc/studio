@@ -60,10 +60,12 @@ export function Navigation() {
       <div className="mr-auto flex items-center gap-4">
         {user ? (
           <div className="flex items-center gap-4">
-            <div className="hidden items-center gap-2 text-sm text-muted-foreground md:flex">
-              <UserIcon className="h-4 w-4" />
-              <span>{user.email || 'משתמש אנונימי'}</span>
-            </div>
+            {user.email && (
+              <div className="hidden items-center gap-2 text-sm text-muted-foreground md:flex">
+                <UserIcon className="h-4 w-4" />
+                <span>{user.email}</span>
+              </div>
+            )}
             <Button variant="ghost" size="sm" onClick={handleLogout} className="gap-2 text-muted-foreground hover:text-destructive">
               <LogOut className="h-4 w-4" />
               <span className="hidden md:inline">התנתק</span>

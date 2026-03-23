@@ -853,7 +853,10 @@ export default function MyGuidesPage() {
         <div className="flex flex-1 items-center justify-center" dir="rtl">
           <div className="space-y-3 text-center">
             <p className="text-sm text-gray-500">התחבר כדי לראות את הספריה שלך</p>
-            <Button asChild variant="outline" size="sm">
+            <Button asChild size="sm">
+              <Link href="/login">התחברות</Link>
+            </Button>
+            <Button asChild variant="ghost" size="sm">
               <Link href="/">חזור לדף הבית</Link>
             </Button>
           </div>
