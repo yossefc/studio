@@ -8,12 +8,12 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Textarea } from '@/components/ui/textarea';
 import { Input } from '@/components/ui/input';
 import { Progress } from '@/components/ui/progress';
-import { Loader2, AlertCircle, ArrowRight, ChevronDown, XCircle, ScrollText } from 'lucide-react';
+import { Loader2, AlertCircle, ArrowRight, ChevronDown, XCircle, ScrollText, Search, Hash } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { TehilimReader } from '@/components/TehilimReader';
-import { generateMultiSourceStudyGuide, exportSummaryToGoogleDocs, exportToGoogleDocs, loadFreeTierGuide, getMonthlyUsageCount, type GenerationResult, type SourceResult } from '@/app/actions/study-guide';
+import { generateMultiSourceStudyGuide, exportSummaryToGoogleDocs, exportToGoogleDocs, loadFreeTierGuide, getMonthlyUsageCount, checkExistingGuide, type GenerationResult, type SourceResult } from '@/app/actions/study-guide';
 import { getSimanOptions, getSeifOptions, type SimanOption, type SeifOption } from '@/app/actions/sefaria-metadata';
 import type { SourceKey } from '@/lib/sefaria-api';
 import { hebrewToNumber } from '@/lib/hebrew-utils';
@@ -151,6 +151,7 @@ export default function GeneratePage() {
   const [loadingSimanim, setLoadingSimanim] = useState(true);
   const [loadingSeifim, setLoadingSeifim] = useState(false);
   const [isConfigPanelOpen, setIsConfigPanelOpen] = useState(true);
+  const [simanSearch, setSimanSearch] = useState('');
 
   const [status, setStatus] = useState<'idle' | 'processing' | 'preview' | 'exporting' | 'success' | 'error'>('idle');
   const [error, setError] = useState('');
@@ -227,6 +228,24 @@ export default function GeneratePage() {
     () => isFreeTierContent(section, siman, seif),
     [section, siman, seif],
   );
+
+  // Filter simanim based on search
+  const filteredSimanOptions = useMemo(() => {
+    if (!simanSearch.trim()) return simanOptions;
+    const search = simanSearch.trim().toLowerCase();
+    // Parse as number if possible
+    const searchNum = parseInt(search);
+    return simanOptions.filter(opt => {
+      // Match by number
+      if (!isNaN(searchNum) && String(opt.value) === String(searchNum)) return true;
+      if (String(opt.value).includes(search)) return true;
+      // Match by Hebrew label
+      if (opt.label.includes(search)) return true;
+      // Match by subject
+      if (opt.subject?.toLowerCase().includes(search)) return true;
+      return false;
+    });
+  }, [simanOptions, simanSearch]);
 
   const renderAccentText = (text: string | undefined | null, accentClass: string) => {
     const normalized = (text ?? '')
@@ -528,16 +547,58 @@ export default function GeneratePage() {
     if (!user && !isFreeTier) { router.push('/login'); return; }
     if (!siman || !user || !firestore || selectedSources.length === 0) return;
     if (needsSeif && !seif) return;
-    setStatus('processing');
-    setError('');
-    const studyGuideId = `guide_${Date.now()}`;
-    setCurrentGuideId(studyGuideId);
+
     const sectionLabel = CLEAN_SECTION_LABELS[section] || 'Orach Chayim';
     const simanLabel = simanOptions.find(o => String(o.value) === siman)?.label || siman;
     const seifLabel = seifOptions.find(o => String(o.value) === seif)?.label || seif;
     const displayTref = isTorahOhrFullParasha
       ? `${sectionLabel} ${simanLabel}`
       : `${sectionLabel} ${simanLabel}${needsSeif ? `:${seifLabel}` : ''}`;
+
+    setStatus('processing');
+    setError('');
+
+    // First, check if this content already exists (either in canonical cache or user's collection)
+    try {
+      const existingCheck = await checkExistingGuide({
+        section,
+        siman,
+        seif: needsSeif ? seif : undefined,
+        sources: selectedSources,
+      });
+
+      if (existingCheck.exists && existingCheck.guideData) {
+        // Content already exists - show it without regenerating
+        const { guideData } = existingCheck;
+        const existingGuide: StudyGuideEntity = {
+          id: `existing_${Date.now()}`,
+          userId: user.uid,
+          tref: displayTref,
+          sefariaRef: guideData.tref,
+          language: 'he',
+          status: 'Preview',
+          summaryText: guideData.summary,
+          googleDocUrl: '',
+          googleDocId: '',
+          validated: guideData.validated,
+          sources: guideData.sources,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        };
+        setGuide(existingGuide);
+        setPreviewSourceResults(guideData.sourceResults);
+        setPreviewSummary(guideData.summary);
+        setStatus('preview');
+        return;
+      }
+    } catch (checkErr) {
+      // If check fails, continue with generation
+      console.log('[handleGenerate] Existing check failed, proceeding with generation:', checkErr);
+    }
+
+    // No existing content found - proceed with generation
+    const studyGuideId = `guide_${Date.now()}`;
+    setCurrentGuideId(studyGuideId);
     const guideRef = doc(firestore, 'users', user.uid, 'studyGuides', studyGuideId);
     const now = new Date().toISOString();
     try {
@@ -706,19 +767,19 @@ export default function GeneratePage() {
     <div className="flex h-screen flex-col overflow-hidden bg-white">
       <Navigation />
 
-      {/* ?? Toolbar ?? */}
-      <div className="flex shrink-0 items-center gap-3 border-b border-gray-200 bg-white px-4 py-2 pt-14 print:hidden" dir="rtl">
-        <h1 className="shrink-0 text-sm font-semibold text-gray-800">בניית דף עיון</h1>
+      {/* Toolbar - Mobile responsive */}
+      <div className="flex shrink-0 flex-wrap items-center gap-2 md:gap-3 border-b border-gray-200 bg-white px-3 md:px-4 py-2 pt-14 print:hidden" dir="rtl">
+        <h1 className="shrink-0 text-sm font-semibold text-gray-800 hidden sm:block">בניית דף עיון</h1>
         {currentReference && (
-          <span className="text-xs text-gray-500">{currentReference}</span>
+          <span className="text-xs text-gray-500 truncate max-w-[150px] sm:max-w-none">{currentReference}</span>
         )}
         <button
           type="button"
           onClick={() => setIsConfigPanelOpen((prev) => !prev)}
-          className="flex items-center gap-1 rounded-md border border-gray-200 px-2.5 py-1.5 text-xs text-gray-600 hover:border-gray-300 hover:text-gray-900"
+          className="flex items-center gap-1 rounded-md border border-gray-200 px-2 md:px-2.5 py-1.5 text-xs text-gray-600 hover:border-gray-300 hover:text-gray-900"
         >
           <ChevronDown className={cn('h-3.5 w-3.5 transition-transform', !isConfigPanelOpen && '-rotate-90')} />
-          הגדרות
+          <span className="hidden sm:inline">הגדרות</span>
         </button>
         <div className="flex-1" />
         {(status === 'preview' || status === 'success') && (
@@ -773,9 +834,15 @@ export default function GeneratePage() {
             </button>
           )}
 
-          {/* ?? Sidebar – config panel ?? */}
+          {/* Sidebar – config panel - Mobile: slide-over drawer */}
           {isConfigPanelOpen && (
-            <aside className="flex w-72 shrink-0 flex-col overflow-hidden border-l border-gray-200 print:hidden">
+            <>
+            {/* Mobile backdrop */}
+            <div
+              className="fixed inset-0 z-30 bg-black/30 md:hidden"
+              onClick={() => setIsConfigPanelOpen(false)}
+            />
+            <aside className="fixed right-0 top-0 z-40 flex h-full w-80 flex-col overflow-hidden border-l border-gray-200 bg-white pt-14 md:static md:z-auto md:w-72 md:pt-0 print:hidden">
             <ScrollArea className="flex-1">
               <div className="space-y-4 p-4" dir="rtl">
 
@@ -796,82 +863,152 @@ export default function GeneratePage() {
                   </Select>
                 </div>
 
-                {/* Quick jump */}
-                {section !== 'Torah Ohr' && (
-                  <div className="space-y-1.5">
-                    <p className="text-[11px] font-semibold uppercase tracking-wider text-gray-400">קפיצה מהירה</p>
-                    <div className="flex gap-1.5">
-                      <Input
-                        value={quickJumpRef}
-                        onChange={(e) => setQuickJumpRef(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') { e.preventDefault(); applyQuickJump(); }
-                        }}
-                        placeholder="288:3 או רפח:ג"
-                        className="h-8 rounded-md border-gray-200 text-sm"
-                        disabled={isInteractionDisabled}
-                        dir="rtl"
-                      />
+                {/* Unified Siman & Seif Selector */}
+                <div className="rounded-xl border border-gray-200 bg-gray-50/50 p-3 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <p className="text-xs font-semibold text-gray-700">
+                      {section === 'Torah Ohr' ? 'פרשה ומאמר' : 'סימן וסעיף'}
+                    </p>
+                    {siman && seif && (
+                      <span className="text-xs font-medium text-primary bg-primary/10 px-2 py-0.5 rounded-full">
+                        {selectedSimanLabel}:{selectedSeifLabel}
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Quick input - type siman:seif directly */}
+                  {section !== 'Torah Ohr' && (
+                    <div className="flex gap-2">
+                      <div className="relative flex-1">
+                        <Hash className="absolute right-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+                        <Input
+                          value={quickJumpRef}
+                          onChange={(e) => setQuickJumpRef(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') { e.preventDefault(); applyQuickJump(); }
+                          }}
+                          placeholder="הקלד: 288:3 או רפח:ג"
+                          className="h-10 rounded-lg border-gray-200 bg-white pr-9 text-sm font-medium"
+                          disabled={isInteractionDisabled}
+                          dir="rtl"
+                        />
+                      </div>
                       <button
                         type="button"
                         onClick={applyQuickJump}
-                        disabled={isInteractionDisabled}
-                        className="h-8 shrink-0 rounded-md border border-gray-200 bg-white px-2.5 text-xs text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                        disabled={isInteractionDisabled || !quickJumpRef.trim()}
+                        className="h-10 shrink-0 rounded-lg bg-primary px-4 text-sm font-semibold text-white hover:bg-primary/90 disabled:opacity-50 transition-colors"
                       >
-                        החל
+                        עבור
                       </button>
                     </div>
-                    {quickJumpError && <p className="text-xs text-destructive">{quickJumpError}</p>}
-                  </div>
-                )}
+                  )}
+                  {quickJumpError && <p className="text-xs text-destructive">{quickJumpError}</p>}
 
-                {/* Siman + Seif */}
-                <div className={`grid gap-2 ${needsSeif ? 'grid-cols-2' : 'grid-cols-1'}`}>
-                  <div className="space-y-1.5">
-                    <p className="text-[11px] font-semibold uppercase tracking-wider text-gray-400">
-                      {section === 'Torah Ohr' ? 'פרשה' : 'סימן'}
-                    </p>
-                    {loadingSimanim ? (
-                      <div className="flex h-8 items-center justify-center rounded-md bg-gray-50 text-xs text-gray-400">
-                        <Loader2 className="mr-1 h-3 w-3 animate-spin" /> טוען...
-                      </div>
-                    ) : (
-                      <Select value={siman} onValueChange={setSiman} disabled={isInteractionDisabled}>
-                        <SelectTrigger className="h-8 rounded-md border-gray-200 text-sm">
-                          <SelectValue placeholder="בחר" />
+                  <div className="flex items-center gap-2 text-xs text-gray-400">
+                    <div className="flex-1 h-px bg-gray-200" />
+                    <span>או בחר מהרשימה</span>
+                    <div className="flex-1 h-px bg-gray-200" />
+                  </div>
+
+                  {/* Siman dropdown */}
+                  {loadingSimanim ? (
+                    <div className="flex h-11 items-center justify-center rounded-lg bg-white text-xs text-gray-400 border border-gray-200">
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" /> טוען סימנים...
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      {/* Search input for simanim */}
+                      {simanOptions.length > 20 && (
+                        <div className="relative">
+                          <Search className="absolute right-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+                          <Input
+                            value={simanSearch}
+                            onChange={(e) => setSimanSearch(e.target.value)}
+                            placeholder="חפש לפי מספר או נושא..."
+                            className="h-10 rounded-lg border-gray-200 bg-white pr-9 text-sm"
+                            disabled={isInteractionDisabled}
+                            dir="rtl"
+                          />
+                        </div>
+                      )}
+                      {/* Siman dropdown */}
+                      <Select value={siman} onValueChange={(val) => { setSiman(val); setSimanSearch(''); }} disabled={isInteractionDisabled}>
+                        <SelectTrigger className="h-auto min-h-[2.75rem] rounded-lg border-gray-200 bg-white text-sm py-2">
+                          <SelectValue placeholder="בחר סימן">
+                            {siman && (() => {
+                              const selected = simanOptions.find(o => String(o.value) === siman);
+                              return selected ? (
+                                <div className="text-right">
+                                  <span className="font-semibold">{selected.label}</span>
+                                  <span className="text-gray-400 mr-1">({selected.value})</span>
+                                  {selected.subject && (
+                                    <span className="block text-xs text-gray-500 truncate">{selected.subject}</span>
+                                  )}
+                                </div>
+                              ) : siman;
+                            })()}
+                          </SelectValue>
                         </SelectTrigger>
-                        <SelectContent className="max-h-[260px]">
-                          {simanOptions.map(opt => (
-                            <SelectItem key={opt.value} value={String(opt.value)} className="text-sm">
-                              {opt.label}{section === 'Torah Ohr' ? '' : ` (${opt.value})`}
-                            </SelectItem>
-                          ))}
+                        <SelectContent className="max-h-[300px]">
+                          {filteredSimanOptions.length === 0 ? (
+                            <div className="px-3 py-2 text-sm text-gray-400 text-center">לא נמצאו תוצאות</div>
+                          ) : (
+                            filteredSimanOptions.map(opt => (
+                              <SelectItem key={opt.value} value={String(opt.value)} className="text-sm py-2">
+                                <div className="text-right">
+                                  <span className="font-medium">{opt.label}</span>
+                                  <span className="text-gray-400 mr-1">({opt.value})</span>
+                                  {opt.subject && (
+                                    <span className="block text-xs text-gray-500 truncate max-w-[200px]">{opt.subject}</span>
+                                  )}
+                                </div>
+                              </SelectItem>
+                            ))
+                          )}
                         </SelectContent>
                       </Select>
-                    )}
-                  </div>
+                    </div>
+                  )}
+
+                  {/* Seif Selector - inside unified box */}
                   {needsSeif && (
-                    <div className="space-y-1.5">
-                      <p className="text-[11px] font-semibold uppercase tracking-wider text-gray-400">
-                        {section === 'Torah Ohr' ? 'מאמר' : 'סעיף'}
+                    <div className="space-y-2 pt-2 border-t border-gray-200">
+                      <p className="text-xs font-medium text-gray-600">
+                        {section === 'Torah Ohr' ? 'בחר מאמר:' : 'בחר סעיף:'}
                       </p>
                       {loadingSeifim ? (
-                        <div className="flex h-8 items-center justify-center rounded-md bg-gray-50 text-xs text-gray-400">
-                          <Loader2 className="mr-1 h-3 w-3 animate-spin" /> טוען...
+                        <div className="flex h-10 items-center justify-center rounded-lg bg-white text-xs text-gray-400 border border-gray-200">
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" /> טוען סעיפים...
+                        </div>
+                      ) : seifOptions.length === 0 ? (
+                        <div className="flex h-10 items-center justify-center rounded-lg bg-white text-xs text-gray-400 border border-dashed border-gray-300">
+                          בחר סימן תחילה
                         </div>
                       ) : (
-                        <Select value={seif} onValueChange={setSeif} disabled={isInteractionDisabled || seifOptions.length === 0}>
-                          <SelectTrigger className="h-8 rounded-md border-gray-200 text-sm">
-                            <SelectValue placeholder="בחר" />
-                          </SelectTrigger>
-                          <SelectContent className="max-h-[260px]">
-                            {seifOptions.map(opt => (
-                              <SelectItem key={opt.value} value={String(opt.value)} className="text-sm">
-                                {opt.label}{section === 'Torah Ohr' ? '' : ` (${opt.value})`}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
+                        <div className="grid grid-cols-6 gap-1.5">
+                          {seifOptions.map(opt => (
+                            <button
+                              key={opt.value}
+                              type="button"
+                              onClick={() => setSeif(String(opt.value))}
+                              disabled={isInteractionDisabled}
+                              className={cn(
+                                'h-9 rounded-lg border text-sm font-medium transition-colors disabled:opacity-50',
+                                String(opt.value) === seif
+                                  ? 'border-primary bg-primary text-white shadow-sm'
+                                  : 'border-gray-200 bg-white text-gray-700 hover:border-primary/50 hover:bg-primary/5'
+                              )}
+                            >
+                              {opt.label}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                      {seifOptions.length > 0 && (
+                        <p className="text-[10px] text-gray-400 text-center mt-1">
+                          {seifOptions.length} סעיפים בסימן {selectedSimanLabel}
+                        </p>
                       )}
                     </div>
                   )}
@@ -1020,10 +1157,19 @@ export default function GeneratePage() {
                   : needsLogin ? 'התחבר כדי להמשיך' : 'בנה דף עיון'}
               </button>
             </div>
+            {/* Mobile close button */}
+            <button
+              type="button"
+              onClick={() => setIsConfigPanelOpen(false)}
+              className="absolute left-2 top-16 rounded-full bg-gray-100 p-2 text-gray-600 hover:bg-gray-200 md:hidden"
+            >
+              <XCircle className="h-4 w-4" />
+            </button>
             </aside>
+            </>
           )}
 
-          {/* ?? Main content ?? */}
+          {/* Main content */}
           <main className="flex flex-1 flex-col overflow-hidden">
 
             {/* idle / error */}

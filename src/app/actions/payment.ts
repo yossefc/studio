@@ -133,6 +133,78 @@ export interface SubscriptionStatus {
   currentPeriodEnd?: number; // Unix timestamp in seconds
 }
 
+/**
+ * Creates a one-time payment session for purchasing additional credits (Top-up).
+ * 10 credits for 5₪
+ */
+export async function createTopUpSession(): Promise<
+  { url: string } | { error: string }
+> {
+  try {
+    const authUser = await getAuthenticatedUser();
+    const pageUid = process.env.PAYPLUS_TOPUP_PAGE_UID || process.env.PAYPLUS_PAGE_UID;
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000';
+
+    if (!pageUid) {
+      return { error: 'PAYPLUS_PAGE_UID not configured.' };
+    }
+
+    const payload = {
+      payment_page_uid: pageUid,
+      charge_total: 5,
+      currency_code: 'ILS',
+      refURL_success: `${appUrl}/my-guides?topup=success`,
+      refURL_failure: `${appUrl}/my-guides?topup=cancelled`,
+      client_reference_uid: `${authUser.uid}:topup`,
+      customer: {
+        customer_name: authUser.email ?? '',
+        email: authUser.email ?? '',
+      },
+      items: [
+        {
+          name: 'TalmudAI — 10 קרדיטים נוספים',
+          quantity: 1,
+          price: 5,
+          vat_type: 1,
+        },
+      ],
+      payment_methods: ['credit_card', 'bit'],
+    };
+
+    const res = await fetch(`${PAYPLUS_BASE_URL}/PaymentPages/generateLink`, {
+      method: 'POST',
+      headers: getPayPlusHeaders(),
+      body: JSON.stringify(payload),
+    });
+
+    if (!res.ok) {
+      const text = await res.text();
+      console.error('[PayPlus] generateLink (top-up) HTTP error:', res.status, text);
+      return { error: `PayPlus error (${res.status})` };
+    }
+
+    const data = (await res.json()) as {
+      results?: {
+        status: number;
+        description: string;
+        payment_page_link?: string;
+      };
+    };
+
+    if (!data.results?.payment_page_link) {
+      console.error('[PayPlus] No payment_page_link in top-up response:', data);
+      return {
+        error: data.results?.description ?? 'PayPlus did not return a payment URL.',
+      };
+    }
+
+    return { url: data.results.payment_page_link };
+  } catch (err) {
+    console.error('[PayPlus] createTopUpSession error:', err);
+    return { error: err instanceof Error ? err.message : 'Payment error.' };
+  }
+}
+
 export async function checkSubscriptionStatus(): Promise<SubscriptionStatus> {
   try {
     const authUser = await getAuthenticatedUser();
@@ -161,5 +233,35 @@ export async function checkSubscriptionStatus(): Promise<SubscriptionStatus> {
   } catch {
     // Not authenticated or Firestore error — treat as not subscribed
     return { isActive: false };
+  }
+}
+
+const ADMIN_EMAILS = ['yossefcohzar@gmail.com'];
+
+/**
+ * Check if the current user has admin access.
+ * Checks (in order):
+ *   1. Admin email list
+ *   2. Firestore `users/{uid}.role === 'admin'`
+ */
+export async function checkAdminStatus(): Promise<{ isAdmin: boolean }> {
+  try {
+    const authUser = await getAuthenticatedUser();
+
+    // 1. Admin email list
+    if (ADMIN_EMAILS.includes((authUser.email ?? '').toLowerCase())) {
+      return { isAdmin: true };
+    }
+
+    // 2. Firestore role field
+    const db = getAdminDb();
+    const snap = await db.collection('users').doc(authUser.uid).get();
+    if (snap.exists && snap.data()?.role === 'admin') {
+      return { isAdmin: true };
+    }
+
+    return { isAdmin: false };
+  } catch {
+    return { isAdmin: false };
   }
 }

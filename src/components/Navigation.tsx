@@ -2,29 +2,77 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { BookOpen, History, PlusCircle, User as UserIcon, LogOut, Shield } from 'lucide-react';
+import { useEffect, useState, useRef } from 'react';
+import { BookOpen, History, PlusCircle, User as UserIcon, LogOut, Shield, Crown } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useUser, useAuth } from '@/firebase';
 import { Button } from '@/components/ui/button';
 import { signOut } from 'firebase/auth';
+import { checkSubscriptionStatus, checkAdminStatus } from '@/app/actions/payment';
 
 export function Navigation() {
   const pathname = usePathname();
   const { user } = useUser();
   const auth = useAuth();
+  const [isSubscribed, setIsSubscribed] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
+  const lastCheckedUid = useRef<string | null>(null);
+
+  // Check subscription and admin status via server actions
+  useEffect(() => {
+    if (!user) {
+      setIsSubscribed(false);
+      setIsAdmin(false);
+      lastCheckedUid.current = null;
+      return;
+    }
+
+    // Avoid re-fetching for the same user
+    if (lastCheckedUid.current === user.uid) {
+      return;
+    }
+
+    const checkUserStatus = async () => {
+      try {
+        // Fetch both in parallel
+        const [subStatus, adminStatus] = await Promise.all([
+          checkSubscriptionStatus(),
+          checkAdminStatus(),
+        ]);
+        setIsSubscribed(subStatus.isActive);
+        setIsAdmin(adminStatus.isAdmin);
+        lastCheckedUid.current = user.uid;
+      } catch (error) {
+        console.warn('[Navigation] Status check failed:', error);
+        setIsSubscribed(false);
+        setIsAdmin(false);
+        lastCheckedUid.current = user.uid;
+      }
+    };
+
+    checkUserStatus();
+  }, [user]);
 
   const handleLogout = () => {
     if (auth) signOut(auth);
   };
 
-  const ADMIN_EMAIL = 'yossefcohzar@gmail.com';
-  const isAdmin = (user?.email ?? '').toLowerCase() === ADMIN_EMAIL.toLowerCase();
+  const canGenerate = isAdmin || isSubscribed;
 
-  const links = [
+  // Links for users who CAN generate
+  const fullLinks = [
     { href: '/', label: 'ראשי', icon: BookOpen },
     { href: '/generate', label: 'בניית דף', icon: PlusCircle },
     { href: '/my-guides', label: 'הביאורים שלי', icon: History },
   ];
+
+  // Links for FREE users - no generate button
+  const freeLinks = [
+    { href: '/', label: 'ראשי', icon: BookOpen },
+    { href: '/my-guides', label: 'הביאורים שלי', icon: History },
+  ];
+
+  const links = canGenerate ? fullLinks : freeLinks;
 
   return (
     <nav className="fixed bottom-0 left-0 right-0 z-50 flex items-center justify-around border-t border-border bg-white px-6 py-2 md:top-0 md:bottom-auto md:justify-start md:gap-8 print:hidden">
@@ -43,6 +91,20 @@ export function Navigation() {
           <span>{label}</span>
         </Link>
       ))}
+
+      {/* Upgrade CTA for free users */}
+      {user && !canGenerate && (
+        <Link
+          href="/pricing"
+          className={cn(
+            'flex flex-col items-center gap-1 rounded-md px-3 py-1 text-xs font-medium transition-colors md:flex-row md:gap-2 md:text-sm',
+            'bg-gradient-to-r from-amber-500 to-amber-600 text-white hover:from-amber-600 hover:to-amber-700 shadow-sm',
+          )}
+        >
+          <Crown className="h-5 w-5" />
+          <span>שדרג עכשיו</span>
+        </Link>
+      )}
 
       {isAdmin && (
         <Link

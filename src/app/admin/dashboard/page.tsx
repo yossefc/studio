@@ -6,6 +6,7 @@ import { getAuthenticatedUser } from '@/lib/server-auth';
 import { isAdminUser } from '@/lib/admin-role';
 import { getDashboardStats, listDashboardUsers } from '@/app/actions/admin-dashboard';
 import { UserTable } from './UserTable';
+import { PricingConfigSection } from './PricingConfig';
 
 function formatIls(value: number): string {
   return new Intl.NumberFormat('he-IL', {
@@ -96,6 +97,11 @@ export default async function AdminDashboardPage() {
               מבוסס תשלומי PayPlus
             </div>
           </div>
+        </section>
+
+        {/* Pricing Configuration */}
+        <section className="mb-10">
+          <PricingConfigSection />
         </section>
 
         {/* User Management */}

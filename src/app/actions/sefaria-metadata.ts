@@ -13,6 +13,7 @@ const SEFARIA_SECTION_MAP: Record<string, string> = {
 export interface SimanOption {
     value: number | string;
     label: string; // Hebrew letter representation or Parasha name
+    subject?: string; // Topic/subject of the siman (e.g. "הלכות השכמת הבוקר")
 }
 
 export interface SeifOption {
@@ -63,16 +64,24 @@ export async function getSeifCount(section: string, siman: number): Promise<numb
 }
 
 /**
- * Returns an array of siman options {value, label} for the dropdown.
+ * Returns an array of siman options {value, label, subject} for the dropdown.
  */
 export async function getSimanOptions(section: string): Promise<SimanOption[]> {
     if (section === 'Torah Ohr') {
         return getTorahOhrParashot();
     }
-    const count = await getSimanCount(section);
+    // Fetch count and subjects in parallel
+    const [count, subjects] = await Promise.all([
+        getSimanCount(section),
+        getSimanSubjects(section),
+    ]);
     const options: SimanOption[] = [];
     for (let i = 1; i <= count; i++) {
-        options.push({ value: i, label: numberToHebrew(i) });
+        options.push({
+            value: i,
+            label: numberToHebrew(i),
+            subject: subjects[i],
+        });
     }
     return options;
 }

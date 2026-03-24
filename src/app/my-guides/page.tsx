@@ -4,6 +4,7 @@ import Link from 'next/link';
 import {
   Check,
   ChevronDown,
+  Crown,
   ExternalLink,
   FileText,
   Loader2,
@@ -13,21 +14,25 @@ import {
   Printer,
   ScrollText,
   Search,
+  Sparkles,
   Star,
   Trash2,
   X,
 } from 'lucide-react';
 import { collection, deleteDoc, doc, getDocs, orderBy, query, updateDoc } from 'firebase/firestore';
 import { type MouseEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { exportAllGuidesToGoogleDocs, exportSeifToGoogleDocs, exportSimanSummariesToGoogleDocs } from '@/app/actions/study-guide';
+import { exportAllGuidesToGoogleDocs, exportSeifToGoogleDocs, exportSimanSummariesToGoogleDocs, loadDemoSeifim, type DemoGuideData } from '@/app/actions/study-guide';
 
 import { Navigation } from '@/components/Navigation';
+import { CreditTracker } from '@/components/CreditTracker';
+import { PricingCards } from '@/components/PricingCards';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useCollection, useFirestore, useMemoFirebase, useUser } from '@/firebase';
 import { syncFirebaseSession } from '@/firebase/session-sync';
+import { checkSubscriptionStatus } from '@/app/actions/payment';
 import { hebrewToNumber, numberToHebrew } from '@/lib/hebrew-utils';
 import { normalizeTref } from '@/lib/sefaria-api';
 import type { SourceKey } from '@/lib/sefaria-api';
@@ -225,6 +230,262 @@ const SOURCE_THEME: Record<string, {
 const SOURCE_ORDER = ['tur', 'beit_yosef', 'shulchan_arukh', 'mishnah_berurah', 'rav_ovadia'];
 const DIRECTOR_EMAIL = 'yossefcohzar@gmail.com';
 
+/* Demo Seifim View for Free Users */
+interface DemoSeifimViewProps {
+  demoSeifim: DemoGuideData[];
+  activeDemoSeif: DemoGuideData | null;
+  setActiveDemoSeif: (seif: DemoGuideData | null) => void;
+  isDemoLoading: boolean;
+  onUpgradeClick: () => void;
+}
+
+function DemoSeifimView({
+  demoSeifim,
+  activeDemoSeif,
+  setActiveDemoSeif,
+  isDemoLoading,
+  onUpgradeClick,
+}: DemoSeifimViewProps) {
+  type DemoChunk = DemoGuideData['chunks'][number];
+  const chunksBySource = useMemo(() => {
+    const map = new Map<string, DemoChunk[]>();
+    if (!activeDemoSeif) return map;
+    for (const chunk of activeDemoSeif.chunks) {
+      if (!map.has(chunk.sourceKey)) {
+        map.set(chunk.sourceKey, []);
+      }
+      map.get(chunk.sourceKey)!.push(chunk);
+    }
+    return map;
+  }, [activeDemoSeif]);
+
+  const orderedSourceEntries = useMemo(() => (
+    [...chunksBySource.entries()].sort(([sourceA], [sourceB]) => {
+      const a = SOURCE_ORDER.indexOf(sourceA);
+      const b = SOURCE_ORDER.indexOf(sourceB);
+      return (a === -1 ? 99 : a) - (b === -1 ? 99 : b);
+    })
+  ), [chunksBySource]);
+
+  const summarySections = useMemo(
+    () => parseSummarySections(activeDemoSeif?.summaryText ?? ''),
+    [activeDemoSeif?.summaryText],
+  );
+
+  return (
+    <div className="relative flex flex-1 flex-col md:flex-row overflow-hidden" dir="rtl">
+      {/* Mobile: Seif selector as horizontal tabs */}
+      <div className="flex md:hidden shrink-0 items-center gap-2 border-b border-gray-200 bg-amber-50 px-3 py-2 overflow-x-auto">
+        <Sparkles className="h-4 w-4 text-amber-600 shrink-0" />
+        <span className="text-xs font-medium text-amber-800 shrink-0">דוגמאות:</span>
+        {demoSeifim.map((seif) => (
+          <button
+            key={seif.seif}
+            type="button"
+            onClick={() => setActiveDemoSeif(seif)}
+            className={cn(
+              'shrink-0 rounded-full px-3 py-1 text-xs font-medium transition-colors',
+              activeDemoSeif?.seif === seif.seif
+                ? 'bg-amber-600 text-white'
+                : 'bg-white border border-amber-200 text-amber-700 hover:bg-amber-100'
+            )}
+          >
+            סעיף {numberToHebrew(parseInt(seif.seif, 10))}
+          </button>
+        ))}
+        <button
+          onClick={onUpgradeClick}
+          className="shrink-0 rounded-full bg-gradient-to-r from-amber-500 to-amber-600 px-3 py-1 text-xs font-medium text-white"
+        >
+          שדרג
+        </button>
+      </div>
+
+      {/* Desktop: Sidebar with demo seifim list */}
+      <aside className="hidden md:flex w-64 shrink-0 flex-col overflow-hidden border-l border-gray-200 print:hidden">
+        {/* Header */}
+        <div className="shrink-0 border-b border-gray-200 p-4 bg-amber-50">
+          <div className="flex items-center gap-2 mb-2">
+            <Sparkles className="h-5 w-5 text-amber-600" />
+            <h2 className="font-semibold text-amber-900">דוגמאות חינמיות</h2>
+          </div>
+          <p className="text-xs text-amber-700">
+            צפה בביאורים לאורח חיים סימן א׳
+          </p>
+        </div>
+
+        {/* Seifim list */}
+        <div className="flex-1 overflow-y-auto p-2">
+          {isDemoLoading ? (
+            <div className="flex justify-center py-8">
+              <Loader2 className="h-6 w-6 animate-spin text-amber-500" />
+            </div>
+          ) : (
+            <div className="space-y-1">
+              {demoSeifim.map((seif) => {
+                const isActive = activeDemoSeif?.seif === seif.seif;
+                return (
+                  <button
+                    key={seif.seif}
+                    type="button"
+                    onClick={() => setActiveDemoSeif(seif)}
+                    className={cn(
+                      'w-full rounded-lg px-3 py-2.5 text-right transition-colors',
+                      isActive
+                        ? 'bg-amber-600 text-white'
+                        : 'hover:bg-amber-50 text-gray-700'
+                    )}
+                  >
+                    <div className="font-medium">סעיף {numberToHebrew(parseInt(seif.seif, 10))}</div>
+                    <div className={cn('text-xs truncate', isActive ? 'text-amber-100' : 'text-gray-400')}>
+                      {extractFirstTopic(seif.summaryText) || seif.tref}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        {/* Upgrade CTA */}
+        <div className="shrink-0 border-t border-amber-200 bg-gradient-to-b from-amber-50 to-amber-100 p-4">
+          <p className="text-xs text-amber-800 mb-3 text-center">
+            רוצה ליצור ביאורים משלך?
+          </p>
+          <Button
+            onClick={onUpgradeClick}
+            className="w-full bg-amber-600 hover:bg-amber-700 text-white"
+            size="sm"
+          >
+            <Crown className="ml-1.5 h-4 w-4" />
+            שדרג עכשיו
+          </Button>
+        </div>
+      </aside>
+
+      {/* Main content area */}
+      <main className="flex flex-1 flex-col overflow-hidden">
+        {activeDemoSeif ? (
+          <>
+            {/* Header bar */}
+            <div className="flex shrink-0 items-center justify-between border-b border-gray-200 px-5 py-3 bg-amber-50/50">
+              <div>
+                <span className="font-semibold text-gray-900">{activeDemoSeif.tref}</span>
+                <span className="mr-3 text-xs text-gray-400">
+                  {activeDemoSeif.sources.length} מקורות · דוגמה חינמית
+                </span>
+              </div>
+              <div className="flex items-center gap-2 text-xs text-amber-700">
+                <Sparkles className="h-4 w-4" />
+                תוכן לדוגמה
+              </div>
+            </div>
+
+            {/* Content */}
+            <div className="flex flex-1 overflow-hidden">
+              {/* Sources tabs */}
+              <div className="flex flex-1 flex-col overflow-hidden">
+                <Tabs defaultValue={orderedSourceEntries[0]?.[0]} className="flex flex-1 flex-col overflow-hidden">
+                  <TabsList className="flex h-auto w-full shrink-0 gap-0 rounded-none border-b border-gray-200 bg-white p-0">
+                    {orderedSourceEntries.map(([sourceKey]) => (
+                      <TabsTrigger
+                        key={sourceKey}
+                        value={sourceKey}
+                        className="rounded-none border-b-2 border-transparent px-4 py-2 text-sm font-medium text-gray-500 data-[state=active]:border-amber-600 data-[state=active]:bg-transparent data-[state=active]:text-amber-700 data-[state=active]:shadow-none"
+                      >
+                        {SOURCE_LABELS[sourceKey] || sourceKey}
+                      </TabsTrigger>
+                    ))}
+                  </TabsList>
+                  <div className="flex-1 overflow-hidden">
+                    {orderedSourceEntries.map(([sourceKey, sourceChunks]) => {
+                      const theme = SOURCE_THEME[sourceKey] || SOURCE_THEME.shulchan_arukh;
+                      return (
+                        <TabsContent
+                          key={sourceKey}
+                          value={sourceKey}
+                          className="mt-0 h-full overflow-y-auto"
+                        >
+                          <div className="space-y-5 p-5 text-right">
+                            {sourceChunks.map((chunk, index) => (
+                              <div
+                                key={`${chunk.sourceKey}-${chunk.orderIndex}`}
+                                className={cn('space-y-2', index > 0 && 'border-t border-gray-100 pt-5')}
+                              >
+                                <p className="font-sefer text-base leading-7 text-gray-800">
+                                  {chunk.rawText.trim()}
+                                </p>
+                                {chunk.explanationText && (
+                                  <div
+                                    className={cn(
+                                      'whitespace-pre-wrap border-r-2 py-2 pr-3 text-sm leading-7 text-gray-600',
+                                      theme.borderAccent,
+                                    )}
+                                  >
+                                    {renderAccentText(chunk.explanationText, theme.accentClass)}
+                                  </div>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        </TabsContent>
+                      );
+                    })}
+                  </div>
+                </Tabs>
+              </div>
+
+              {/* Summary column */}
+              <aside className="relative flex w-64 shrink-0 flex-col overflow-hidden border-r border-gray-200">
+                <div className="flex shrink-0 items-center justify-between border-b border-gray-100 px-4 py-2">
+                  <p className="text-[11px] font-semibold uppercase tracking-wider text-gray-400">
+                    סיכום למבחן
+                  </p>
+                </div>
+
+                <div className="flex-1 overflow-y-auto p-4">
+                  <div className="space-y-4 font-sefer text-sm leading-7 text-gray-800">
+                    {summarySections.length > 0 ? (
+                      summarySections.map((section, index) => (
+                        <section key={`${section.title}-${index}`}>
+                          <h4 className="mb-1.5 border-b border-gray-100 pb-1 font-bold text-gray-900">
+                            {section.title}
+                          </h4>
+                          {section.paragraphs.map((paragraph, pi) => (
+                            <p key={pi} className="mb-1 text-gray-700">
+                              {renderAccentText(paragraph, 'text-gray-900')}
+                            </p>
+                          ))}
+                          {section.items.length > 0 && (
+                            <ul className="space-y-1 text-gray-700">
+                              {section.items.map((item, ii) => (
+                                <li key={ii} className="flex gap-2">
+                                  <span className="shrink-0 text-gray-400">•</span>
+                                  <span>{renderAccentText(item, 'text-gray-900')}</span>
+                                </li>
+                              ))}
+                            </ul>
+                          )}
+                        </section>
+                      ))
+                    ) : (
+                      <p className="text-gray-400">לא נוצר סיכום.</p>
+                    )}
+                  </div>
+                </div>
+              </aside>
+            </div>
+          </>
+        ) : (
+          <div className="flex flex-1 items-center justify-center">
+            <p className="text-sm text-gray-400">בחר סעיף מהרשימה</p>
+          </div>
+        )}
+      </main>
+    </div>
+  );
+}
+
 function parseTref(tref: string): ParsedTref {
   const englishMatch = tref.match(/^(.+?)\s+(\d+)(?::(\d+))?$/);
 
@@ -398,6 +659,19 @@ export default function MyGuidesPage() {
   const [isLoadingChunks, setIsLoadingChunks] = useState(false);
   const [simanSubjects, setSimanSubjects] = useState<Record<string, Record<number, string>>>({});
 
+  // Subscription & Pricing Modal state
+  const [isSubscribed, setIsSubscribed] = useState<boolean | null>(null);
+  const [showPricingModal, setShowPricingModal] = useState(false);
+  const [demoSeifim, setDemoSeifim] = useState<DemoGuideData[]>([]);
+  const [isDemoLoading, setIsDemoLoading] = useState(false);
+  const [activeDemoSeif, setActiveDemoSeif] = useState<DemoGuideData | null>(null);
+
+  // Refs to prevent duplicate fetches
+  const subscriptionCheckedRef = useRef(false);
+  const demoLoadedRef = useRef(false);
+  const topicsBackfilledRef = useRef<Set<string>>(new Set());
+  const simanSubjectsFetchedRef = useRef<Set<string>>(new Set());
+
   const [printAllData, setPrintAllData] = useState<PrintGuideData[] | null>(null);
   const [isPrintAllLoading, setIsPrintAllLoading] = useState(false);
   const [isExportAllLoading, setIsExportAllLoading] = useState(false);
@@ -416,6 +690,49 @@ export default function MyGuidesPage() {
   const [summaryWidth, setSummaryWidth] = useState(256);
   const summaryTextareaRef = useRef<HTMLTextAreaElement>(null);
   const summaryResizeRef = useRef<{ startX: number; startW: number } | null>(null);
+
+  // Check subscription status on mount (only once per user)
+  useEffect(() => {
+    if (!user) {
+      setIsSubscribed(null);
+      subscriptionCheckedRef.current = false;
+      return;
+    }
+    // Prevent duplicate checks for the same session
+    if (subscriptionCheckedRef.current) return;
+    subscriptionCheckedRef.current = true;
+
+    checkSubscriptionStatus()
+      .then((status) => setIsSubscribed(status.isActive))
+      .catch(() => setIsSubscribed(false));
+  }, [user]);
+
+  // Load demo seifim for free users (only once)
+  useEffect(() => {
+    if (isSubscribed !== false) return;
+    if (demoLoadedRef.current) return;
+    demoLoadedRef.current = true;
+
+    setIsDemoLoading(true);
+    loadDemoSeifim()
+      .then((seifim) => {
+        setDemoSeifim(seifim);
+        if (seifim.length > 0) {
+          setActiveDemoSeif(seifim[0]);
+        }
+      })
+      .catch((err) => console.error('[MyGuides] Failed to load demo seifim:', err))
+      .finally(() => setIsDemoLoading(false));
+  }, [isSubscribed]);
+
+  // Handle "מדריך חדש" click - show modal for free users
+  const handleNewGuideClick = () => {
+    if (isSubscribed === false) {
+      setShowPricingModal(true);
+    } else {
+      window.location.href = '/generate';
+    }
+  };
 
   // Inject print-override CSS and trigger print when printAllData is ready
   useEffect(() => {
@@ -498,7 +815,11 @@ export default function MyGuidesPage() {
   useEffect(() => {
     for (const sectionGroup of hierarchy) {
       const bookTitle = SECTION_TO_BOOK_TITLE[sectionGroup.section];
-      if (!bookTitle || simanSubjects[sectionGroup.section]) continue;
+      if (!bookTitle) continue;
+      // Skip if already fetched or currently in state
+      if (simanSubjectsFetchedRef.current.has(sectionGroup.section) || simanSubjects[sectionGroup.section]) continue;
+      simanSubjectsFetchedRef.current.add(sectionGroup.section);
+
       fetchSimanSubjectsForSection(bookTitle).then((subjects) => {
         setSimanSubjects((prev) => ({ ...prev, [sectionGroup.section]: subjects }));
       }).catch(() => { /* ignore */ });
@@ -506,13 +827,18 @@ export default function MyGuidesPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hierarchy]);
 
-  // Backfill topics for old guides that don't have them in Firestore
+  // Backfill topics for old guides that don't have them in Firestore (run only once per guide)
   useEffect(() => {
     if (!guides || !user || !firestore) return;
-    const guidesWithoutTopics = guides.filter(g => !g.topics || g.topics.length === 0);
+    const guidesWithoutTopics = guides.filter(g =>
+      (!g.topics || g.topics.length === 0) && !topicsBackfilledRef.current.has(g.id)
+    );
     if (guidesWithoutTopics.length === 0) return;
 
     guidesWithoutTopics.forEach((guide) => {
+      // Mark as processed immediately to prevent duplicate fetches
+      topicsBackfilledRef.current.add(guide.id);
+
       const rawRef = guide.sefariaRef || guide.tref;
       if (!rawRef) return;
       const ref = normalizeTref(rawRef);
@@ -805,20 +1131,20 @@ export default function MyGuidesPage() {
     <div className="flex h-screen flex-col overflow-hidden bg-white">
       <Navigation />
 
-      {/* ג”€ג”€ Toolbar ג”€ג”€ */}
-      <div className="flex shrink-0 items-center gap-3 border-b border-gray-200 bg-white px-4 py-2 pt-14 print:hidden" dir="rtl">
-        <h1 className="shrink-0 text-sm font-semibold text-gray-800">הספריה שלי</h1>
-        <div className="relative max-w-xs flex-1">
+      {/* Toolbar - Mobile responsive */}
+      <div className="flex shrink-0 flex-wrap items-center gap-2 md:gap-3 border-b border-gray-200 bg-white px-3 md:px-4 py-2 pt-14 print:hidden" dir="rtl">
+        <h1 className="shrink-0 text-sm font-semibold text-gray-800 hidden md:block">הספריה שלי</h1>
+        <div className="relative flex-1 min-w-[120px] max-w-xs">
           <Search className="absolute right-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-gray-400" />
           <Input
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             placeholder="חיפוש..."
-            className="h-7 rounded-md border-gray-200 pr-8 text-right text-sm"
+            className="h-8 md:h-7 rounded-md border-gray-200 pr-8 text-right text-sm"
             dir="rtl"
           />
         </div>
-        <span className="shrink-0 text-xs text-gray-400">
+        <span className="shrink-0 text-xs text-gray-400 hidden sm:block">
           {totalEntries} ביאורים · {totalSimanim} סימנים
         </span>
         <button
@@ -826,27 +1152,53 @@ export default function MyGuidesPage() {
           onClick={() => setIsSimanimPanelOpen((prev) => !prev)}
           title={isSimanimPanelOpen ? 'סגור עץ סימנים' : 'פתח עץ סימנים'}
           className={cn(
-            'flex h-7 shrink-0 items-center gap-1.5 rounded-md border px-2.5 text-xs transition-colors',
+            'flex h-8 md:h-7 shrink-0 items-center gap-1.5 rounded-md border px-2 md:px-2.5 text-xs transition-colors',
             isSimanimPanelOpen
               ? 'border-gray-300 bg-gray-100 text-gray-800'
               : 'border-gray-200 text-gray-500 hover:border-gray-300 hover:text-gray-800'
           )}
         >
           <PanelLeft className="h-3.5 w-3.5" />
-          <span>סימנים</span>
+          <span className="hidden sm:inline">סימנים</span>
           {!isSimanimPanelOpen && totalSimanim > 0 && (
             <span className="rounded-full bg-gray-200 px-1.5 text-[10px] font-semibold text-gray-600">
               {totalSimanim}
             </span>
           )}
         </button>
-        <Button asChild size="sm" className="h-7 shrink-0 rounded-md bg-gray-900 px-3 text-xs text-white hover:bg-gray-700">
-          <Link href="/generate">
-            <Plus className="ml-1 h-3 w-3" />
-            מדריך חדש
-          </Link>
+        <Button
+          size="sm"
+          className="h-8 md:h-7 shrink-0 rounded-md bg-gray-900 px-2 md:px-3 text-xs text-white hover:bg-gray-700"
+          onClick={handleNewGuideClick}
+        >
+          <Plus className="ml-1 h-3 w-3" />
+          <span className="hidden sm:inline">מדריך חדש</span>
+          <span className="sm:hidden">חדש</span>
         </Button>
       </div>
+
+      {/* Pricing Modal for free users */}
+      {showPricingModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          {/* Backdrop with blur */}
+          <div
+            className="absolute inset-0 bg-black/50 backdrop-blur-sm"
+            onClick={() => setShowPricingModal(false)}
+          />
+          {/* Modal content */}
+          <div className="relative z-10 w-full max-w-4xl max-h-[90vh] overflow-y-auto bg-white rounded-2xl shadow-2xl mx-4 p-6">
+            <button
+              onClick={() => setShowPricingModal(false)}
+              className="absolute top-4 left-4 p-2 rounded-full hover:bg-gray-100 transition-colors"
+            >
+              <X className="h-5 w-5 text-gray-500" />
+            </button>
+            <div className="pt-4">
+              <PricingCards />
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ג”€ג”€ States ג”€ג”€ */}
       {!user && !isLoading ? (
@@ -866,19 +1218,46 @@ export default function MyGuidesPage() {
           <Loader2 className="h-5 w-5 animate-spin text-gray-300" />
         </div>
       ) : !guides || guides.length === 0 ? (
+        isSubscribed === false && demoSeifim.length > 0 ? (
+          /* Free user with demo seifim - show full demo content */
+          <DemoSeifimView
+            demoSeifim={demoSeifim}
+            activeDemoSeif={activeDemoSeif}
+            setActiveDemoSeif={setActiveDemoSeif}
+            isDemoLoading={isDemoLoading}
+            onUpgradeClick={() => setShowPricingModal(true)}
+          />
+        ) : (
         <div className="flex flex-1 items-center justify-center" dir="rtl">
-          <div className="space-y-3 text-center">
-            <ScrollText className="mx-auto h-8 w-8 text-gray-300" />
-            <p className="font-medium text-gray-700">הספריה ריקה</p>
-            <p className="text-sm text-gray-400">צור ביאור ראשון כדי להתחיל</p>
-            <Button asChild size="sm" className="bg-gray-900 text-white hover:bg-gray-700">
-              <Link href="/generate">
-                <Plus className="ml-1.5 h-3.5 w-3.5" />
-                צור ביאור
-              </Link>
+          <div className="space-y-4 text-center max-w-md">
+            {isDemoLoading ? (
+              <Loader2 className="mx-auto h-8 w-8 animate-spin text-amber-500" />
+            ) : (
+              <ScrollText className="mx-auto h-10 w-10 text-gray-300" />
+            )}
+            <div>
+              <p className="font-medium text-gray-700 text-lg">הספריה שלך ריקה</p>
+              <p className="text-sm text-gray-400 mt-1">
+                {isSubscribed === false
+                  ? 'שדרג למנוי כדי ליצור ביאורים מותאמים אישית'
+                  : 'צור ביאור ראשון כדי להתחיל'}
+              </p>
+            </div>
+
+            <Button
+              size="sm"
+              className={isSubscribed === false
+                ? 'bg-amber-600 text-white hover:bg-amber-700'
+                : 'bg-gray-900 text-white hover:bg-gray-700'
+              }
+              onClick={handleNewGuideClick}
+            >
+              <Plus className="ml-1.5 h-3.5 w-3.5" />
+              {isSubscribed === false ? 'שדרג ליצירת ביאורים' : 'צור ביאור'}
             </Button>
           </div>
         </div>
+        )
       ) : (
 
         /* ג”€ג”€ Main layout ג”€ג”€ */
@@ -895,9 +1274,19 @@ export default function MyGuidesPage() {
             </button>
           )}
 
-          {/* ג”€ג”€ Sidebar tree ג”€ג”€ */}
+          {/* Sidebar tree - Mobile: slide-over drawer, Desktop: inline */}
           {isSimanimPanelOpen && (
-          <aside className="flex w-60 shrink-0 flex-col overflow-hidden border-l border-gray-200 print:hidden">
+          <>
+            {/* Mobile backdrop */}
+            <div
+              className="fixed inset-0 z-30 bg-black/30 md:hidden"
+              onClick={() => setIsSimanimPanelOpen(false)}
+            />
+            <aside className="fixed right-0 top-0 z-40 flex h-full w-72 flex-col overflow-hidden border-l border-gray-200 bg-white pt-14 md:static md:z-auto md:w-60 md:pt-0 print:hidden">
+            {/* Credit Tracker at top of sidebar */}
+            <div className="shrink-0 border-b border-gray-200 p-3">
+              <CreditTracker compact={false} />
+            </div>
             <ScrollArea className="flex-1">
               {hierarchy.length === 0 ? (
                 <p className="p-4 text-center text-xs text-gray-400" dir="rtl">
@@ -1014,10 +1403,19 @@ export default function MyGuidesPage() {
                 ))
               )}
             </ScrollArea>
+            {/* Mobile close button */}
+            <button
+              type="button"
+              onClick={() => setIsSimanimPanelOpen(false)}
+              className="absolute left-2 top-16 rounded-full bg-gray-100 p-2 text-gray-600 hover:bg-gray-200 md:hidden"
+            >
+              <X className="h-4 w-4" />
+            </button>
           </aside>
+          </>
           )}
 
-          {/* ג”€ג”€ Content area ג”€ג”€ */}
+          {/* Content area */}
           <main className="flex flex-1 flex-col overflow-hidden">
             {activeGuide ? (
               <>
